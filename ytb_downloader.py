@@ -44,7 +44,8 @@ def get_available_streams(url):
     try:
         yt = YouTube(url, on_progress_callback=on_progress)  # Передаем on_progress
         streams = yt.streams.filter(progressive=False, file_extension='mp4').order_by('resolution').desc()
-        return [f"{stream.resolution} ({stream.mime_type}) - {round(stream.filesize/(1024*1024))}MB" for stream in streams]
+        print(streams)
+        return [f"{stream.resolution} ({stream.mime_type}, {stream.video_codec}) - {round(stream.filesize/(1024*1024))}MB" for stream in streams]
     except Exception as e:
         output_text.insert(tk.END, f"Ошибка: {str(e)}\n")
         return []
@@ -140,7 +141,7 @@ select_quality_button.pack(padx=5, pady=5)
 
 # Выпадающий список для выбора качества (изначально скрыт)
 quality_label = tk.Label(root, text="Выберите качество:")
-quality_combobox = ttk.Combobox(root, state="readonly")
+quality_combobox = ttk.Combobox(root, state="readonly", width=35)
 
 # Кнопка "Скачать" (изначально скрыта)
 download_button = tk.Button(root, text="Скачать", command=download_video)

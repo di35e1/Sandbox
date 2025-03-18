@@ -44,7 +44,6 @@ def get_available_streams(url):
     try:
         yt = YouTube(url, on_progress_callback=on_progress)  # Передаем on_progress
         streams = yt.streams.filter(progressive=False, file_extension='mp4').order_by('resolution').desc()
-        print(streams)
         return [f"{stream.resolution} ({stream.mime_type}, {stream.video_codec}) - {round(stream.filesize/(1024*1024))}MB" for stream in streams]
     except Exception as e:
         output_text.insert(tk.END, f"Ошибка: {str(e)}\n")

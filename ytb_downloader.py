@@ -79,6 +79,7 @@ def download_video():
 
 # Функция для отображения списка доступных потоков
 def show_quality_options():
+    output_text.pack(padx=10, pady=10)
     url = entry.get()  # Получаем URL из поля ввода
     output_text.delete(1.0, tk.END)  # Очищаем текстовое поле
 
@@ -98,7 +99,6 @@ def show_quality_options():
     quality_combobox.current(0)  # Выбираем первый элемент по умолчанию
 
     # Показываем выпадающий список и кнопку "Скачать"
-    output_text.pack(padx=10, pady=10)
     quality_label.pack(padx=10, pady=10)
     quality_combobox.pack(padx=10, ipady=5)
     download_button.pack(padx=10, pady=10)

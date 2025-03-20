@@ -35,8 +35,6 @@ def get_available_streams(url):
 
 # Функция для выполнения загрузки
 def download_video():
-    global progress_line_index
-
     try:
         selected_index = quality_combobox.current()
         if selected_index == -1:
@@ -56,8 +54,6 @@ def download_video():
 
     except Exception as e:
         output_text.insert(tk.END, f"Ошибка: {str(e)}\n")
-    finally:
-        progress_line_index = None
 
 # Функция для отображения информации и списка доступных потоков
 def show_quality_options():
@@ -71,7 +67,7 @@ def show_quality_options():
 
     # Очищаем текстовое поле
     output_text.delete(1.0, tk.END)
-    output_text.insert(tk.END, "Получаем информацию о видео...")
+    output_text.insert(tk.END, "Получаем информацию о видео ...")
 
     # Создаем очередь для получения результата из потока
     result_queue = queue.Queue()
@@ -94,6 +90,7 @@ def check_result(result_queue, url):
     except queue.Empty:
         # Если результат еще не готов, проверяем снова через 100 мс
         output_text.insert(tk.END, ".")
+        output_text.see(tk.END)
         root.after(100, lambda: check_result(result_queue, url))
         return
 
@@ -116,6 +113,7 @@ def check_result(result_queue, url):
         output_text.insert(tk.END, f"Длительность: {yt.length // 60} мин. {yt.length % 60} сек.\n")
     else:
         # Если произошла ошибка, выводим её
+        output_text.delete(1.0, tk.END)
         output_text.insert(tk.END, result + "\n")
 
 def close_combobox(event):

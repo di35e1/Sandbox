@@ -4,7 +4,7 @@ from pytubefix import YouTube
 import os
 import re
 import threading
-
+import queue
 
 # Директория для загрузки
 download_directory = os.path.expanduser("~") + '/Downloads'
@@ -23,7 +23,7 @@ def on_progress(stream, chunk, bytes_remaining):
         output_text.insert(tk.END, "\nЗагружено 100%\n")
     output_text.see(tk.END)
 
-# Функция для получения списка доступных потоков MP4 (streams) 
+# Функция для получения списка доступных потоков MP4 (streams)
 def get_available_streams(url):
     global streams
     try:
@@ -31,8 +31,7 @@ def get_available_streams(url):
         streams = yt.streams.filter(progressive=False, file_extension='mp4').order_by('resolution').desc()
         return [f"{stream.resolution} (Codec: {stream.video_codec}) ~ {round(stream.filesize/(1024*1024))}MB" for stream in streams]
     except Exception as e:
-        output_text.insert(tk.END, f"Ошибка: {str(e)}\n")
-        return []
+        return f"Ошибка: {str(e)}"
 
 # Функция для выполнения загрузки
 def download_video():
@@ -70,25 +69,54 @@ def show_quality_options():
         output_text.insert(tk.END, "Ошибка: Неверный URL YouTube.\n")
         return
 
-    available_streams = get_available_streams(url)
-    if not available_streams:
-        output_text.insert(tk.END, "Ошибка: Не удалось получить список потоков.\n")
+    # Очищаем текстовое поле
+    output_text.delete(1.0, tk.END)
+    output_text.insert(tk.END, "Получаем информацию о видео...")
+
+    # Создаем очередь для получения результата из потока
+    result_queue = queue.Queue()
+
+    # Запускаем функцию в отдельном потоке
+    threading.Thread(
+        target=lambda q, u: q.put(get_available_streams(u)),
+        args=(result_queue, url),
+        daemon=True
+    ).start()
+
+    # Проверяем результат через 100 мс
+    root.after(100, lambda: check_result(result_queue, url))
+
+# Функция для проверки результата из потока
+def check_result(result_queue, url):
+    try:
+        # Пытаемся получить результат из очереди
+        result = result_queue.get_nowait()
+    except queue.Empty:
+        # Если результат еще не готов, проверяем снова через 100 мс
+        output_text.insert(tk.END, ".")
+        root.after(100, lambda: check_result(result_queue, url))
         return
 
-    # Обновляем выпадающий список
-    quality_combobox['values'] = available_streams
-    quality_combobox.current(0)  # Выбираем первый элемент по умолчанию
+    # Обрабатываем результат
+    if isinstance(result, list):
+        # Обновляем выпадающий список
+        quality_combobox['values'] = result
+        quality_combobox.current(0)  # Выбираем первый элемент по умолчанию
 
-    # Показываем выпадающий список и кнопку "Скачать"
-    quality_label.pack(padx=10, pady=10)
-    quality_combobox.pack()
-    download_button.pack(padx=10, pady=10)
+        # Показываем выпадающий список и кнопку "Скачать"
+        quality_label.pack(padx=10, pady=10)
+        quality_combobox.pack()
+        download_button.pack(padx=10, pady=10)
 
-    # Выводим информацию о видео
-    yt = YouTube(url)  # Передаем on_progress
-    output_text.insert(tk.END, f"Название видео: {yt.title}\n")
-    output_text.insert(tk.END, f"Автор: {yt.author}\n")
-    output_text.insert(tk.END, f"Длительность: {yt.length // 60} мин. {yt.length % 60} сек.\n")
+        # Выводим информацию о видео
+        output_text.delete(1.0, tk.END)
+        yt = YouTube(url)  # Передаем on_progress
+        output_text.insert(tk.END, f"Название видео: {yt.title}\n")
+        output_text.insert(tk.END, f"Автор: {yt.author}\n")
+        output_text.insert(tk.END, f"Длительность: {yt.length // 60} мин. {yt.length % 60} сек.\n")
+    else:
+        # Если произошла ошибка, выводим её
+        output_text.insert(tk.END, result + "\n")
 
 def close_combobox(event):
     # Генерируем событие Escape, чтобы закрыть выпадающий при перетаскивании окна
@@ -102,8 +130,8 @@ root.bind('<Configure>', close_combobox)
 # Вычисляем координаты центра экрана
 screen_width = root.winfo_screenwidth()
 screen_height = root.winfo_screenheight()
-window_width = 600 # Ширина основного окна
-window_height = 400  # Высота основного окна
+window_width = 600  # Ширина основного окна
+window_height = 380  # Высота основного окна
 x = (screen_width // 2) - (window_width // 2)
 y = (screen_height // 2) - (window_height // 2)
 
@@ -131,9 +159,8 @@ quality_combobox = ttk.Combobox(root, state="readonly", width=30)
 download_button = tk.Button(root, text="Скачать", command=download_video)
 
 # Текстовое поле для вывода результата
-output_text = tk.Text(root, height=7, width=60, padx=5, pady=5, wrap="word", font=("TkTextFont"), 
+output_text = tk.Text(root, height=7, width=60, padx=5, pady=5, wrap="word", font=("TkTextFont"),
                       highlightthickness=0, borderwidth=2)
-
 
 # Запуск основного цикла
 root.mainloop()

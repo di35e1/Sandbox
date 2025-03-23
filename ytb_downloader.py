@@ -18,9 +18,16 @@ def is_valid_youtube_url(url):
 
 # Функция для вывода прогресса загрузки
 def on_progress(stream, chunk, bytes_remaining):
+    total_size = stream.filesize
+    bytes_downloaded = total_size - bytes_remaining
+
+    progressbar.pack(padx=0, expand=True, anchor="s", fill='x')
+    progressbar.start(15)
+
     output_text.insert(tk.END, ".")
     if bytes_remaining == 0:
         output_text.insert(tk.END, "\nЗагружено 100%\n")
+        progressbar.stop()
     output_text.see(tk.END)
 
 # Функция для получения списка доступных потоков MP4 (streams)
@@ -57,17 +64,23 @@ def download_video():
 
 # Функция для отображения информации и списка доступных потоков
 def show_quality_options():
+    url = entry.get()
     output_text.pack(padx=10, pady=10)
     output_text.delete(1.0, tk.END)
-    url = entry.get()
 
     if not is_valid_youtube_url(url):
         output_text.insert(tk.END, "Ошибка: Неверный URL YouTube.\n")
         return
 
+    progressbar.pack(pady=0, ipady=0, expand=True, anchor='s', fill='x')
+    progressbar.configure(mode="indeterminate")
+    progressbar.start(15)
+
     # Очищаем текстовое поле
     output_text.delete(1.0, tk.END)
     output_text.insert(tk.END, "Получаем информацию о видео ...")
+    select_quality_button.config(state="disabled")
+    output_text.config(state="disabled")
 
     # Создаем очередь для получения результата из потока
     result_queue = queue.Queue()
@@ -87,10 +100,14 @@ def check_result(result_queue, url):
     try:
         # Пытаемся получить результат из очереди
         result = result_queue.get_nowait()
+        select_quality_button.config(state="normal")
+        output_text.config(state="normal")
+        progressbar.stop()
+        progressbar.pack_forget()
     except queue.Empty:
         # Если результат еще не готов, проверяем снова через 100 мс
-        output_text.insert(tk.END, ".")
-        output_text.see(tk.END)
+        #output_text.insert(tk.END, ".")
+        #output_text.see(tk.END)
         root.after(100, lambda: check_result(result_queue, url))
         return
 
@@ -142,8 +159,9 @@ root.focus_force()
 # Поле для ввода URL
 label = tk.Label(root, text="Введите URL YouTube видео:")
 label.pack(pady=10)
-entry = tk.Entry(root, width=55)
+entry = tk.Entry(root, width=55, )
 entry.pack(padx=40)
+entry.insert(0, "https://www.youtube.com/watch?v=7YobC1Q40M0")
 
 # Кнопка "Проверить URL"
 select_quality_button = tk.Button(root, text="Проверить адрес", command=show_quality_options)
@@ -158,7 +176,9 @@ download_button = tk.Button(root, text="Скачать", command=download_video)
 
 # Текстовое поле для вывода результата
 output_text = tk.Text(root, height=7, width=60, padx=5, pady=5, wrap="word", font=("TkTextFont"),
-                      highlightthickness=0, borderwidth=2)
+                      highlightthickness=0, borderwidth=2, state="normal")
+
+progressbar =  ttk.Progressbar(orient="horizontal")
 
 # Запуск основного цикла
 root.mainloop()

@@ -21,13 +21,11 @@ def on_progress(stream, chunk, bytes_remaining):
     total_size = stream.filesize
     bytes_downloaded = total_size - bytes_remaining
 
-    progressbar.pack(padx=0, expand=True, anchor="s", fill='x')
-    progressbar.start(15)
-
     output_text.insert(tk.END, ".")
     if bytes_remaining == 0:
         output_text.insert(tk.END, "\nЗагружено 100%\n")
         progressbar.stop()
+        progressbar.pack_forget()
     output_text.see(tk.END)
 
 # Функция для получения списка доступных потоков MP4 (streams)
@@ -52,6 +50,9 @@ def download_video():
         msg = f"Загрузка: {selected_stream.resolution} ({selected_stream.mime_type}, {selected_stream.video_codec})\n"
         output_text.insert(tk.END, msg)
 
+        progressbar.pack(pady=0, padx=20, expand=True, anchor='n', fill='x')
+        progressbar.start()
+
         # Загружаем видео в отдельном потоке
         threading.Thread(
             target=selected_stream.download,
@@ -65,15 +66,14 @@ def download_video():
 # Функция для отображения информации и списка доступных потоков
 def show_quality_options():
     url = entry.get()
-    output_text.pack(padx=10, pady=10)
+    output_text.pack(padx=20, pady=10)
     output_text.delete(1.0, tk.END)
 
     if not is_valid_youtube_url(url):
         output_text.insert(tk.END, "Ошибка: Неверный URL YouTube.\n")
         return
 
-    progressbar.pack(pady=0, ipady=0, expand=True, anchor='s', fill='x')
-    progressbar.configure(mode="indeterminate")
+    progressbar.pack(pady=0, padx=20, expand=True, anchor='n', fill='x')
     progressbar.start(15)
 
     # Очищаем текстовое поле
@@ -159,8 +159,8 @@ root.focus_force()
 # Поле для ввода URL
 label = tk.Label(root, text="Введите URL YouTube видео:")
 label.pack(pady=10)
-entry = tk.Entry(root, width=55, )
-entry.pack(padx=40)
+entry = tk.Entry(root)
+entry.pack(padx=40, fill='x')
 entry.insert(0, "https://www.youtube.com/watch?v=7YobC1Q40M0")
 
 # Кнопка "Проверить URL"
@@ -175,10 +175,10 @@ quality_combobox = ttk.Combobox(root, state="readonly", width=30)
 download_button = tk.Button(root, text="Скачать", command=download_video)
 
 # Текстовое поле для вывода результата
-output_text = tk.Text(root, height=7, width=60, padx=5, pady=5, wrap="word", font=("TkTextFont"),
+output_text = tk.Text(root, height=7, padx=5, pady=5, wrap="word", font=("TkTextFont"),
                       highlightthickness=0, borderwidth=2, state="normal")
 
-progressbar =  ttk.Progressbar(orient="horizontal")
+progressbar =  ttk.Progressbar(orient="horizontal", mode="indeterminate")
 
 # Запуск основного цикла
 root.mainloop()

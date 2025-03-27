@@ -2,7 +2,6 @@ import sounddevice as sd
 import numpy as np
 import tkinter as tk
 from tkinter import font as tkfont
-import time
 
 class AudioLevelMeter:
     def __init__(self):
@@ -15,7 +14,7 @@ class AudioLevelMeter:
         
         # Калибровка уровней
         self.LEVEL_RANGE = 60  # Диапазон 60 dB
-        self.PEAK_HOLD_TIME = 1.5  # Удержание пика 1.5 сек
+        self.PEAK_HOLD_TIME = .3  # Удержание пика 1.5 сек
         self.DECAY_RATE = 25  # Скорость затухания 25 dB/сек
         
         # Состояние уровней
@@ -23,6 +22,7 @@ class AudioLevelMeter:
         self.rms_level = -self.LEVEL_RANGE
         self.smoothed_level = -self.LEVEL_RANGE
         self.last_peak_time = 0
+        self.peak_hold_counter = 0
         
         self.setup_window()
         self.setup_ui()
@@ -36,7 +36,7 @@ class AudioLevelMeter:
         self.root.geometry(f"{self.window_width}x{self.window_height}")
         self.root.overrideredirect(True)
         self.root.attributes('-topmost', True)
-        self.root.attributes('-alpha', 0.7)  # 30% прозрачности (1.0 - 0.7 = 0.3)
+        self.root.attributes('-alpha', 0.7)
         self.root.configure(bg='black')
         
         screen_width = self.root.winfo_screenwidth()
@@ -46,7 +46,6 @@ class AudioLevelMeter:
         self.root.geometry(f"+{x}+{y}")
 
     def setup_ui(self):
-        # Заголовок "Mic Level"
         title_font = tkfont.Font(family='Helvetica', size=12, weight='bold')
         self.title_label = tk.Label(
             self.root, 
@@ -57,7 +56,6 @@ class AudioLevelMeter:
         )
         self.title_label.pack(pady=10)
         
-        # Основной холст для VU-метра
         self.canvas = tk.Canvas(
             self.root, 
             width=60, 
@@ -67,7 +65,6 @@ class AudioLevelMeter:
         )
         self.canvas.pack()
         
-        # Цветная шкала dB
         db_scale = [0, -6, -12, -18, -24, -30, -40, -50, -60]
         for db in db_scale:
             y_pos = 220 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
@@ -82,7 +79,6 @@ class AudioLevelMeter:
                 anchor="e"
             )
         
-        # Цветной индикатор уровня
         self.level_bar = self.canvas.create_rectangle(
             10, 220, 40, 220, 
             fill='green', 
@@ -90,14 +86,12 @@ class AudioLevelMeter:
             width=1
         )
         
-        # Пиковый индикатор
         self.peak_bar = self.canvas.create_line(
             10, 220, 40, 220, 
             fill='red', 
             width=2
         )
         
-        # Перемещение окна за заголовок
         self.title_label.bind("<ButtonPress-1>", self.start_move)
         self.title_label.bind("<ButtonRelease-1>", self.stop_move)
         self.title_label.bind("<B1-Motion>", self.do_move)
@@ -129,11 +123,11 @@ class AudioLevelMeter:
         
         if peak_db > self.peak_level:
             self.peak_level = peak_db
-            self.last_peak_time = time.currentTime
+            self.last_peak_time = time.currentTime  # Фиксируем время последнего пика
+            self.peak_hold_counter = int(self.PEAK_HOLD_TIME * 1000 / self.update_interval)
 
     def update_meter(self):
-        current_time = time.time()
-        
+        # Обновление RMS уровня (зеленый индикатор)
         if self.rms_level > self.smoothed_level:
             self.smoothed_level = self.rms_level
         else:
@@ -143,12 +137,17 @@ class AudioLevelMeter:
                 -self.LEVEL_RANGE
             )
         
-        if current_time - self.last_peak_time > self.PEAK_HOLD_TIME:
+        # Обновление пикового уровня (красный индикатор)
+        if self.peak_hold_counter > 0:
+            self.peak_hold_counter -= 1
+        else:
+            decay_amount = self.DECAY_RATE * 2 * (self.update_interval/1000)
             self.peak_level = max(
-                self.peak_level - (self.DECAY_RATE*2 * (self.update_interval/1000)), 
+                self.peak_level - decay_amount, 
                 -self.LEVEL_RANGE
             )
         
+        # Преобразование dB в координаты
         def db_to_pos(db):
             return 220 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
         
@@ -184,4 +183,3 @@ if __name__ == "__main__":
         app = AudioLevelMeter()
     except Exception as e:
         print(f"Application error: {e}")
-        

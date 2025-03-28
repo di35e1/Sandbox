@@ -7,12 +7,13 @@ class AudioLevelMeter:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Audio Level Meter")
+        self.root.config(menu=tk.Menu(self.root))
         
         # Получаем информацию о доступных устройствах
         devices = sd.query_devices()
         default_input = sd.default.device[0]
         self.input_channels = devices[default_input]['max_input_channels']
-        
+
         # Параметры окна (ширина зависит от количества каналов)
         self.window_width = 100 if self.input_channels == 1 else 180
         self.window_height = 300
@@ -57,20 +58,25 @@ class AudioLevelMeter:
             self.root, 
             text=title, 
             bg='black', 
-            fg='white', 
+            fg='lightgray', 
             font=title_font
         )
-        self.title_label.pack(pady=5)
+        self.title_label.pack(pady=10)
         
         self.meter_frame = tk.Frame(self.root, bg='black')
         self.meter_frame.pack()
         
         # Создаем индикаторы в зависимости от количества каналов
         self.canvases = []
-        for i in range(self.input_channels):
-            channel_label = "L" if i == 0 else "R"
+        if self.input_channels == 1:
+            channel_label = "Mono"
             canvas = self.create_meter(self.meter_frame, channel_label)
             self.canvases.append(canvas)
+        else:
+            for i in range(self.input_channels):
+                channel_label = "L" if i == 0 else "R"
+                canvas = self.create_meter(self.meter_frame, channel_label)
+                self.canvases.append(canvas)
         
         self.title_label.bind("<ButtonPress-1>", self.start_move)
         self.title_label.bind("<ButtonRelease-1>", self.stop_move)
@@ -87,7 +93,7 @@ class AudioLevelMeter:
             bg='black', 
             fg='yellow', 
             font=("Arial", 10)
-        ).pack(pady=5)
+        ).pack(pady=0)
         
         canvas = tk.Canvas(
             channel_frame, 
@@ -96,7 +102,7 @@ class AudioLevelMeter:
             bg='black', 
             highlightthickness=0
         )
-        canvas.pack()
+        canvas.pack(pady=5)
         
         db_scale = [-1, -6, -12, -18, -24, -30, -35, -40, -45, -50, -55, -60]
         for db in db_scale:
@@ -113,16 +119,16 @@ class AudioLevelMeter:
             )
         
         canvas.level_bar = canvas.create_rectangle(
-            10, 220, 40, 220, 
+            0, 220, 20, 220, 
             fill='green', 
             outline='white', 
             width=1
         )
         
         canvas.peak_bar = canvas.create_line(
-            10, 220, 40, 220, 
+            0, 220, 44, 220, 
             fill='red', 
-            width=1
+            width=2
         )
         
         return canvas
@@ -132,7 +138,7 @@ class AudioLevelMeter:
         try:
             self.audio_stream = sd.InputStream(
                 samplerate=self.sample_rate,
-                channels=self.input_channels,  # Используем реальное количество каналов
+                channels=self.input_channels,
                 blocksize=1024,
                 callback=self.audio_callback
             )
@@ -192,7 +198,7 @@ class AudioLevelMeter:
             
             if self.smoothed_level[channel] > -6:
                 color = 'red'
-            elif self.smoothed_level[channel] > -12:
+            elif self.smoothed_level[channel] > -15:
                 color = 'orange'
             else:
                 color = 'green'

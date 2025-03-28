@@ -59,23 +59,23 @@ class AudioLevelMeter:
         self.canvas = tk.Canvas(
             self.root, 
             width=60, 
-            height=220, 
+            height=225, 
             bg='black', 
             highlightthickness=0
         )
         self.canvas.pack()
         
-        db_scale = [0, -6, -12, -18, -24, -30, -40, -50, -60]
+        db_scale = [-1, -6, -12, -18, -24, -30, -35, -40, -45, -50, -55, -60]
         for db in db_scale:
             y_pos = 220 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
             color = "red" if db >= -6 else "orange" if db >= -12 else "green"
-            self.canvas.create_line(45, y_pos, 55, y_pos, fill=color, width=2)
+            self.canvas.create_line(50, y_pos, 60, y_pos, fill=color, width=2)
             self.canvas.create_text(
-                40, 
+                45, 
                 y_pos, 
                 text=f"{db}", 
                 fill="white", 
-                font=("Arial", 8), 
+                font=("Arial", 10), 
                 anchor="e"
             )
         
@@ -89,7 +89,7 @@ class AudioLevelMeter:
         self.peak_bar = self.canvas.create_line(
             10, 220, 40, 220, 
             fill='red', 
-            width=2
+            width=1
         )
         
         self.title_label.bind("<ButtonPress-1>", self.start_move)
@@ -154,8 +154,8 @@ class AudioLevelMeter:
         rms_pos = db_to_pos(self.smoothed_level)
         peak_pos = db_to_pos(self.peak_level)
         
-        self.canvas.coords(self.level_bar, 10, rms_pos, 40, 220)
-        self.canvas.coords(self.peak_bar, 10, peak_pos, 40, peak_pos)
+        self.canvas.coords(self.level_bar, 0, rms_pos, 20, 220)
+        self.canvas.coords(self.peak_bar, 0, peak_pos, 49, peak_pos)
         
         if self.smoothed_level > -6:
             color = 'red'

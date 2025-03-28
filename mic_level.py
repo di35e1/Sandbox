@@ -10,12 +10,12 @@ class AudioLevelMeter:
         
         # Параметры окна
         self.window_width = 100
-        self.window_height = 300
+        self.window_height = 280
         
         # Калибровка уровней
         self.LEVEL_RANGE = 60  # Диапазон 60 dB
-        self.PEAK_HOLD_TIME = .3  # Удержание пика 1.5 сек
-        self.DECAY_RATE = 25  # Скорость затухания 25 dB/сек
+        self.PEAK_HOLD_TIME = .3  # Удержание пика (сек)
+        self.DECAY_RATE = 25  # Скорость затухания (dB/сек)
         
         # Состояние уровней
         self.peak_level = -self.LEVEL_RANGE

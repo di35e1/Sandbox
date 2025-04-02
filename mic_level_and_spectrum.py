@@ -10,7 +10,7 @@ class SpectrumAnalyzer:
         self.root.title("Spectrum Analyzer")
         
         # Window parameters
-        self.window_width = 550  # Increased width to accommodate RMS meter
+        self.window_width = 550
         self.window_height = 280
         
         # Analysis parameters
@@ -20,9 +20,15 @@ class SpectrumAnalyzer:
         self.LEVEL_RANGE = 60
         self.DECAY_RATE = 25
         self.PEAK_HOLD_TIME = 1
-        self.MIN_FREQ = 200
-        self.MAX_FREQ = 16000
-        self.input_channels = 1  # Default to mono
+        self.MIN_FREQ = 200  # Default min frequency
+        self.MAX_FREQ = 16000  # Default max frequency
+        self.input_channels = 1
+
+        # Available frequency settings
+        self.available_min_freqs = [20, 50, 100, 150, 200]
+        self.available_max_freqs = [10000, 16000, 20000]
+        self.current_min_freq = self.MIN_FREQ
+        self.current_max_freq = self.MAX_FREQ
 
         # RMS meter parameters
         self.rms_level = -self.LEVEL_RANGE
@@ -30,7 +36,15 @@ class SpectrumAnalyzer:
         self.peak_rms = -self.LEVEL_RANGE
         self.peak_rms_hold_counter = 0
 
-        # Center frequencies
+        # UI elements storage
+        self.freq_labels = []
+        self.db_labels = []
+        self.db_lines = []
+        self.rms_label = None
+        self.rms_meter = None
+        self.rms_peak_indicator = None
+
+        # Initialize frequency bands
         self.band_centers = np.logspace(
             np.log10(self.MIN_FREQ),
             np.log10(self.MAX_FREQ),
@@ -55,14 +69,11 @@ class SpectrumAnalyzer:
     def create_filters(self):
         filters = []
         for i, center_freq in enumerate(self.band_centers):
-            # Узкие полосы - 1/3 октавы
+            # 1/3 octave band width
             low = center_freq / (2**(1/6))
             high = center_freq * (2**(1/6))
-
-            # Широкие полосы - 1 октава
-            # low = center_freq / (2**0.5)
-            # high = center_freq * (2**0.5)
             
+            # Adjust edge frequencies
             if i == 0:
                 low = self.MIN_FREQ
             if i == self.NUM_BANDS - 1:
@@ -74,7 +85,6 @@ class SpectrumAnalyzer:
             except:
                 filters.append(([1], [1]))
                 print(f"Warning: Could not create filter for {center_freq:.0f} Hz")
-        
         return filters
 
     def setup_window(self):
@@ -101,17 +111,28 @@ class SpectrumAnalyzer:
         )
         self.channel_label.place(x=40, y=15)
 
-        # Create menu
+        # Create menu bar with frequency settings
         self.menu_bar = tk.Menu(self.root)
-        self.settings_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.settings_menu.add_command(label="20 Hz", command=lambda: self.set_min_freq(20))
-        self.settings_menu.add_command(label="50 Hz", command=lambda: self.set_min_freq(50))
-        self.settings_menu.add_command(label="100 Hz", command=lambda: self.set_min_freq(100))
-        self.settings_menu.add_command(label="150 Hz", command=lambda: self.set_min_freq(150))
-        self.settings_menu.add_command(label="200 Hz", command=lambda: self.set_min_freq(200))
-        self.menu_bar.add_cascade(label="Min Frequency", menu=self.settings_menu)
+        
+        # Min Frequency menu
+        self.min_freq_menu = tk.Menu(self.menu_bar, tearoff=0)
+        for freq in self.available_min_freqs:
+            self.min_freq_menu.add_command(
+                label=f"{freq} Hz {'✓' if freq == self.current_min_freq else ''}",
+                command=lambda f=freq: self.set_frequency('min', f)
+            )
+        self.menu_bar.add_cascade(label="Min Frequency", menu=self.min_freq_menu)
+        
+        # Max Frequency menu
+        self.max_freq_menu = tk.Menu(self.menu_bar, tearoff=0)
+        for freq in self.available_max_freqs:
+            self.max_freq_menu.add_command(
+                label=f"{freq} Hz {'✓' if freq == self.current_max_freq else ''}",
+                command=lambda f=freq: self.set_frequency('max', f)
+            )
+        self.menu_bar.add_cascade(label="Max Frequency", menu=self.max_freq_menu)
 
-        # Custom gear button using Canvas
+        # Gear icon button
         self.gear_canvas = tk.Canvas(
             self.root,
             width=30,
@@ -122,7 +143,6 @@ class SpectrumAnalyzer:
         )
         self.gear_canvas.place(x=10, y=10)
         
-        # Draw gear icon
         self.gear_icon = self.gear_canvas.create_text(
             15, 12,
             text="⚙",
@@ -130,11 +150,11 @@ class SpectrumAnalyzer:
             fill="gray"
         )
         
-        # Event handlers
         self.gear_canvas.bind("<Button-1>", self.show_menu_button)
         self.gear_canvas.bind("<Enter>", lambda e: self.gear_canvas.itemconfig(self.gear_icon, fill="white"))
         self.gear_canvas.bind("<Leave>", lambda e: self.gear_canvas.itemconfig(self.gear_icon, fill="gray"))
 
+        # Title
         title_font = tkfont.Font(family='Helvetica', size=12, weight='bold')
         self.title_label = tk.Label(
             self.root, 
@@ -145,6 +165,7 @@ class SpectrumAnalyzer:
         )
         self.title_label.pack(pady=10, padx=20, anchor="e")
         
+        # Main canvas
         self.canvas = tk.Canvas(
             self.root, 
             width=self.window_width-20, 
@@ -154,6 +175,7 @@ class SpectrumAnalyzer:
         )
         self.canvas.pack()
 
+        # Window movement handlers
         self.canvas.bind("<ButtonPress-1>", self.start_move)
         self.canvas.bind("<ButtonRelease-1>", self.stop_move)
         self.canvas.bind("<B1-Motion>", self.do_move)        
@@ -164,6 +186,9 @@ class SpectrumAnalyzer:
         band_width = 10
         band_gap = 3
         bands_start_x = 10
+        
+        # Clear existing frequency labels
+        self.freq_labels = []
         
         for i in range(self.NUM_BANDS):
             x1 = bands_start_x + i * (band_width + band_gap)
@@ -184,10 +209,11 @@ class SpectrumAnalyzer:
             )
             self.peak_indicators.append(peak)
             
+            # Frequency labels (only for even bands)
             if i % 2 == 0:
                 freq = int(self.band_centers[i])
                 text = f"{freq/1000:.1f}K" if freq >= 1000 else f"{freq}"
-                self.canvas.create_text(
+                label = self.canvas.create_text(
                     (x1+x2)/2, 
                     215, 
                     text=text, 
@@ -195,23 +221,28 @@ class SpectrumAnalyzer:
                     font=("Arial", 8), 
                     anchor="n"
                 )
+                self.freq_labels.append(label)
 
-        # Level scale
+        # dB scale
         scale_start_x = 450
         db_scale = [-1, -6, -12, -18, -24, -30, -35, -40, -45, -50, -55, -60]
+        
+        self.db_labels = []
+        self.db_lines = []
         
         for db in db_scale:
             y_pos = 200 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
             color = "red" if db >= -6 else "orange" if db >= -12 else "green"
             
-            self.canvas.create_line(
+            line = self.canvas.create_line(
                 scale_start_x, y_pos, 
                 scale_start_x + 15, y_pos,
                 fill=color, 
                 width=2
             )
+            self.db_lines.append(line)
             
-            self.canvas.create_text(
+            label = self.canvas.create_text(
                 scale_start_x - 5, 
                 y_pos, 
                 text=f"{db}", 
@@ -219,6 +250,7 @@ class SpectrumAnalyzer:
                 font=("Arial", 10), 
                 anchor="e"
             )
+            self.db_labels.append(label)
 
         # RMS meter
         rms_meter_x = scale_start_x + 40
@@ -235,7 +267,8 @@ class SpectrumAnalyzer:
             width=1
         )
         
-        self.canvas.create_text(
+        # Store RMS label reference
+        self.rms_label = self.canvas.create_text(
             rms_meter_x + 10,
             215,
             text="RMS",
@@ -244,6 +277,7 @@ class SpectrumAnalyzer:
             anchor="n"
         )
 
+        # Make title draggable too
         self.title_label.bind("<ButtonPress-1>", self.start_move)
         self.title_label.bind("<ButtonRelease-1>", self.stop_move)
         self.title_label.bind("<B1-Motion>", self.do_move)
@@ -257,9 +291,20 @@ class SpectrumAnalyzer:
         finally:
             self.menu_bar.grab_release()
 
-    def set_min_freq(self, freq):
-        """Set minimum frequency and recreate filters"""
-        self.MIN_FREQ = freq
+    def set_frequency(self, freq_type, freq):
+        """Set min or max frequency and update UI"""
+        if freq_type == 'min':
+            self.MIN_FREQ = freq
+            self.current_min_freq = freq
+        else:
+            self.MAX_FREQ = freq
+            self.current_max_freq = freq
+        
+        self.update_frequency_settings()
+
+    def update_frequency_settings(self):
+        """Update all frequency-dependent components"""
+        # Recalculate band centers
         self.band_centers = np.logspace(
             np.log10(self.MIN_FREQ),
             np.log10(self.MAX_FREQ),
@@ -267,62 +312,66 @@ class SpectrumAnalyzer:
         )
         self.filters = self.create_filters()
         
-        # Remove all text elements
-        for item in self.canvas.find_all():
-            if self.canvas.type(item) == "text":
-                self.canvas.delete(item)
+        # Update menu checkmarks
+        self.min_freq_menu.delete(0, tk.END)
+        for f in self.available_min_freqs:
+            self.min_freq_menu.add_command(
+                label=f"{f} Hz {'✓' if f == self.current_min_freq else ''}",
+                command=lambda freq=f: self.set_frequency('min', freq))
         
-        # Redraw dB scale
-        scale_start_x = 450
-        db_scale = [-1, -6, -12, -18, -24, -30, -35, -40, -45, -50, -55, -60]
-        
-        for db in db_scale:
-            y_pos = 200 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
-            color = "red" if db >= -6 else "orange" if db >= -12 else "green"
-            
-            self.canvas.create_text(
-                scale_start_x - 5, 
-                y_pos, 
-                text=f"{db}", 
-                fill="white", 
-                font=("Arial", 10), 
-                anchor="e"
-            )
+        self.max_freq_menu.delete(0, tk.END)
+        for f in self.available_max_freqs:
+            self.max_freq_menu.add_command(
+                label=f"{f} Hz {'✓' if f == self.current_max_freq else ''}",
+                command=lambda freq=f: self.set_frequency('max', freq))
         
         # Update frequency labels
         band_width = 10
         band_gap = 3
         bands_start_x = 10
         
+        # Update existing frequency labels
+        label_index = 0
         for i in range(self.NUM_BANDS):
             if i % 2 == 0:
                 x1 = bands_start_x + i * (band_width + band_gap)
                 x2 = x1 + band_width
                 freq = int(self.band_centers[i])
                 text = f"{freq/1000:.1f}K" if freq >= 1000 else f"{freq}"
-                self.canvas.create_text(
-                    (x1+x2)/2, 
-                    215, 
-                    text=text, 
-                    fill="white", 
-                    font=("Arial", 8), 
-                    anchor="n"
-                )
+                
+                if label_index < len(self.freq_labels):
+                    # Update existing label
+                    self.canvas.itemconfig(self.freq_labels[label_index], text=text)
+                else:
+                    # Create new label if needed
+                    label = self.canvas.create_text(
+                        (x1+x2)/2, 
+                        215, 
+                        text=text, 
+                        fill="white", 
+                        font=("Arial", 8), 
+                        anchor="n"
+                    )
+                    self.freq_labels.append(label)
+                
+                label_index += 1
+
+        # Remove any extra labels if we have fewer now
+        while len(self.freq_labels) > label_index:
+            self.canvas.delete(self.freq_labels.pop())
 
     def setup_audio(self):
         try:
-            # Get input device info
             device_info = sd.query_devices(kind='input')
             device_name = device_info['name']
             self.input_channels = device_info['max_input_channels']
             
-            # Update channel mode label
             mode_text = "Stereo - " if self.input_channels >= 2 else "Mono - "
             self.channel_label.config(text=mode_text + device_name)
 
             self.audio_stream = sd.InputStream(
                 samplerate=self.SAMPLE_RATE,
-                channels=min(self.input_channels, 2),  # Use max 2 channels
+                channels=min(self.input_channels, 2),
                 blocksize=self.BLOCK_SIZE,
                 callback=self.audio_callback
             )
@@ -339,13 +388,13 @@ class SpectrumAnalyzer:
         
         indata = np.clip(indata, -1, 1)
         
-        # For stereo input - average channels
+        # Convert to mono if needed
         if indata.shape[1] >= 2:
             mono_signal = np.mean(indata, axis=1)
         else:
             mono_signal = indata[:, 0]
         
-        # Calculate RMS of the entire signal
+        # Calculate RMS of entire signal
         rms = np.sqrt(np.mean(mono_signal**2))
         self.rms_level = 20 * np.log10(max(rms, 1e-6))
         
@@ -353,7 +402,7 @@ class SpectrumAnalyzer:
             self.peak_rms = self.rms_level
             self.peak_rms_hold_counter = int(self.PEAK_HOLD_TIME * 1000 / self.update_interval)
         
-        # Process band filters
+        # Process each frequency band
         for i in range(self.NUM_BANDS):
             b, a = self.filters[i]
             try:
@@ -391,11 +440,11 @@ class SpectrumAnalyzer:
         def db_to_y(db):
             return 200 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
         
+        # Update RMS display
         rms_y = db_to_y(self.smoothed_rms)
         peak_y = db_to_y(self.peak_rms)
         
-        # Update RMS meter display
-        rms_meter_x = 450 + 40  # Position right of dB scale
+        rms_meter_x = 450 + 40
         self.canvas.coords(
             self.rms_meter,
             rms_meter_x, rms_y,
@@ -406,7 +455,6 @@ class SpectrumAnalyzer:
                 'orange' if self.smoothed_rms > -15 else 'green'
         self.canvas.itemconfig(self.rms_meter, fill=color)
         
-        # Update peak indicator
         self.canvas.coords(
             self.rms_peak_indicator,
             rms_meter_x, peak_y,
@@ -452,7 +500,6 @@ class SpectrumAnalyzer:
         
         self.root.after(self.update_interval, self.update_meter)
 
-    # Window movement methods
     def start_move(self, event):
         self.drag_data = {"x": event.x, "y": event.y}
 

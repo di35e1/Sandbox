@@ -15,17 +15,17 @@ class SpectrumAnalyzer:
         
         # Analysis parameters
         self.SAMPLE_RATE = 44100
-        self.BLOCK_SIZE = 1024
+        self.BLOCK_SIZE = 2048
         self.NUM_BANDS = 31
         self.LEVEL_RANGE = 60
         self.DECAY_RATE = 25
         self.PEAK_HOLD_TIME = 1.5
-        self.MIN_FREQ = 47
+        self.MIN_FREQ = 20
         self.MAX_FREQ = 16000
         self.input_channels = 1
 
         # Available frequency settings
-        self.available_min_freqs = [47, 100, 150, 200]
+        self.available_min_freqs = [20, 50, 100, 150, 200]
         self.available_max_freqs = [10000, 16000, 20000]
         self.current_min_freq = self.MIN_FREQ
         self.current_max_freq = self.MAX_FREQ
@@ -78,7 +78,7 @@ class SpectrumAnalyzer:
                 high = self.MAX_FREQ
                 
             try:
-                if center_freq < 150:
+                if center_freq < 200:
                     b, a = signal.butter(2, [low, high], btype='bandpass', fs=self.SAMPLE_RATE)
                 else:
                     b, a = signal.butter(4, [low, high], btype='bandpass', fs=self.SAMPLE_RATE)
@@ -361,7 +361,7 @@ class SpectrumAnalyzer:
                 samplerate=self.SAMPLE_RATE,
                 channels=min(self.input_channels, 2),
                 blocksize=self.BLOCK_SIZE,
-                latency='low',
+                latency='high',
                 callback=self.audio_callback
             )
             self.audio_stream.start()

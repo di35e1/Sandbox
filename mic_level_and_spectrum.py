@@ -8,11 +8,11 @@ class SpectrumAnalyzer:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Spectrum Analyzer")
-        
+
         # Window parameters
-        self.window_width = 550
+        self.window_width = 515
         self.window_height = 280
-        
+
         # Analysis parameters
         self.SAMPLE_RATE = 44100
         self.BLOCK_SIZE = 2048
@@ -50,18 +50,18 @@ class SpectrumAnalyzer:
             np.log10(self.MAX_FREQ),
             self.NUM_BANDS
         )
-        
+
         # Level states
         self.band_levels = np.zeros(self.NUM_BANDS)
         self.smoothed_levels = np.zeros(self.NUM_BANDS)
         self.peak_levels = np.zeros(self.NUM_BANDS)
         self.peak_hold_counters = np.zeros(self.NUM_BANDS)
-        
+
         self.filters = self.create_filters()
         self.setup_window()
         self.setup_ui()
         self.setup_audio()
-        
+
         self.update_interval = 30
         self.root.after(self.update_interval, self.update_meter)
         self.root.mainloop()
@@ -76,7 +76,7 @@ class SpectrumAnalyzer:
             #     low = self.MIN_FREQ
             if i == self.NUM_BANDS - 1 and self.MAX_FREQ == 20000:
                 high = self.MAX_FREQ
-                
+
             try:
                 if center_freq < 200:
                     b, a = signal.butter(2, [low, high], btype='bandpass', fs=self.SAMPLE_RATE)
@@ -115,7 +115,7 @@ class SpectrumAnalyzer:
 
         # Create menu bar with frequency settings
         self.menu_bar = tk.Menu(self.root)
-        
+
         # Min Frequency menu
         self.min_freq_menu = tk.Menu(self.menu_bar, tearoff=0)
         for freq in self.available_min_freqs:
@@ -124,7 +124,7 @@ class SpectrumAnalyzer:
                 command=lambda f=freq: self.set_frequency('min', f)
             )
         self.menu_bar.add_cascade(label="Min Frequency", menu=self.min_freq_menu)
-        
+
         # Max Frequency menu
         self.max_freq_menu = tk.Menu(self.menu_bar, tearoff=0)
         for freq in self.available_max_freqs:
@@ -159,13 +159,13 @@ class SpectrumAnalyzer:
         # Title
         title_font = tkfont.Font(family='Helvetica', size=12, weight='bold')
         self.title_label = tk.Label(
-            self.root, 
-            text="Input Spectrum Analyzer", 
-            bg='black', 
-            fg='gray', 
+            self.root,
+            text="Input Spectrum Analyzer",
+            bg='black',
+            fg='gray',
             font=title_font
         )
-        self.title_label.pack(pady=10, padx=20, anchor="e")
+        self.title_label.pack(pady=15, padx=90, anchor="e")
         
         # Main canvas
         self.canvas = tk.Canvas(
@@ -236,7 +236,7 @@ class SpectrumAnalyzer:
             
             line = self.canvas.create_line(
                 scale_start_x, y_pos, 
-                scale_start_x + 15, y_pos,
+                scale_start_x + 10, y_pos,
                 fill=color, 
                 width=2
             )
@@ -253,22 +253,22 @@ class SpectrumAnalyzer:
             self.db_labels.append(label)
 
         # RMS meter
-        rms_meter_x = scale_start_x + 40
+        rms_meter_x = scale_start_x + 15
         self.rms_meter = self.canvas.create_rectangle(
-            rms_meter_x, 200, rms_meter_x + 30, 200,
+            rms_meter_x, 200, rms_meter_x + 15, 200,
             fill='green',
             outline='white',
             width=1
         )
-        
+
         self.rms_peak_indicator = self.canvas.create_line(
-            rms_meter_x, 200, rms_meter_x + 30, 200,
+            rms_meter_x - 20, 200, rms_meter_x + 15, 200,
             fill='red',
             width=1
         )
-        
+
         self.rms_label = self.canvas.create_text(
-            rms_meter_x + 15,
+            rms_meter_x + 14,
             215,
             text="RMS",
             fill="white",
@@ -436,11 +436,11 @@ class SpectrumAnalyzer:
         rms_y = db_to_y(self.smoothed_rms)
         peak_y = db_to_y(self.peak_rms)
         
-        rms_meter_x = 450 + 40
+        rms_meter_x = 450 + 20
         self.canvas.coords(
             self.rms_meter,
             rms_meter_x, rms_y,
-            rms_meter_x + 30, 200
+            rms_meter_x + 15, 200
         )
         
         color = 'red' if self.smoothed_rms > -6 else \
@@ -449,8 +449,8 @@ class SpectrumAnalyzer:
         
         self.canvas.coords(
             self.rms_peak_indicator,
-            rms_meter_x, peak_y,
-            rms_meter_x + 30, peak_y
+            rms_meter_x -20, peak_y,
+            rms_meter_x + 15, peak_y
         )
 
         # Обновление полос спектра

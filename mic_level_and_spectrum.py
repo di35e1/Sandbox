@@ -16,7 +16,7 @@ class SpectrumAnalyzer:
         # Analysis parameters
         self.SAMPLE_RATE = 44100
         self.BLOCK_SIZE = 2048
-        self.NUM_BANDS = 32
+        self.NUM_BANDS = 31
         self.LEVEL_RANGE = 60
         self.DECAY_RATE = 25
         self.PEAK_HOLD_TIME = 1

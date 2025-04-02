@@ -15,17 +15,17 @@ class SpectrumAnalyzer:
         
         # Analysis parameters
         self.SAMPLE_RATE = 44100
-        self.BLOCK_SIZE = 2048
+        self.BLOCK_SIZE = 1024
         self.NUM_BANDS = 31
         self.LEVEL_RANGE = 60
         self.DECAY_RATE = 25
-        self.PEAK_HOLD_TIME = 1
-        self.MIN_FREQ = 200  # Default min frequency
-        self.MAX_FREQ = 16000  # Default max frequency
+        self.PEAK_HOLD_TIME = 1.5
+        self.MIN_FREQ = 47
+        self.MAX_FREQ = 16000
         self.input_channels = 1
 
         # Available frequency settings
-        self.available_min_freqs = [20, 50, 100, 150, 200]
+        self.available_min_freqs = [47, 100, 150, 200]
         self.available_max_freqs = [10000, 16000, 20000]
         self.current_min_freq = self.MIN_FREQ
         self.current_max_freq = self.MAX_FREQ
@@ -69,18 +69,20 @@ class SpectrumAnalyzer:
     def create_filters(self):
         filters = []
         for i, center_freq in enumerate(self.band_centers):
-            # 1/3 octave band width
             low = center_freq / (2**(1/6))
             high = center_freq * (2**(1/6))
             
-            # Adjust edge frequencies
-            if i == 0:
-                low = self.MIN_FREQ
-            if i == self.NUM_BANDS - 1:
+            # if i == 0 and self.MAX_FREQ == 20:
+            #     low = self.MIN_FREQ
+            if i == self.NUM_BANDS - 1 and self.MAX_FREQ == 20000:
                 high = self.MAX_FREQ
                 
             try:
-                b, a = signal.butter(4, [low, high], btype='bandpass', fs=self.SAMPLE_RATE)
+                if center_freq < 150:
+                    b, a = signal.butter(2, [low, high], btype='bandpass', fs=self.SAMPLE_RATE)
+                else:
+                    b, a = signal.butter(4, [low, high], btype='bandpass', fs=self.SAMPLE_RATE)
+                # b, a = signal.butter(4, [low, high], btype='bandpass', fs=self.SAMPLE_RATE)
                 filters.append((b, a))
             except:
                 filters.append(([1], [1]))
@@ -187,7 +189,6 @@ class SpectrumAnalyzer:
         band_gap = 3
         bands_start_x = 10
         
-        # Clear existing frequency labels
         self.freq_labels = []
         
         for i in range(self.NUM_BANDS):
@@ -209,7 +210,6 @@ class SpectrumAnalyzer:
             )
             self.peak_indicators.append(peak)
             
-            # Frequency labels (only for even bands)
             if i % 2 == 0:
                 freq = int(self.band_centers[i])
                 text = f"{freq/1000:.1f}K" if freq >= 1000 else f"{freq}"
@@ -255,21 +255,20 @@ class SpectrumAnalyzer:
         # RMS meter
         rms_meter_x = scale_start_x + 40
         self.rms_meter = self.canvas.create_rectangle(
-            rms_meter_x, 200, rms_meter_x + 20, 200,
+            rms_meter_x, 200, rms_meter_x + 30, 200,
             fill='green',
             outline='white',
             width=1
         )
         
         self.rms_peak_indicator = self.canvas.create_line(
-            rms_meter_x, 200, rms_meter_x + 20, 200,
+            rms_meter_x, 200, rms_meter_x + 30, 200,
             fill='red',
             width=1
         )
         
-        # Store RMS label reference
         self.rms_label = self.canvas.create_text(
-            rms_meter_x + 10,
+            rms_meter_x + 15,
             215,
             text="RMS",
             fill="white",
@@ -277,13 +276,11 @@ class SpectrumAnalyzer:
             anchor="n"
         )
 
-        # Make title draggable too
         self.title_label.bind("<ButtonPress-1>", self.start_move)
         self.title_label.bind("<ButtonRelease-1>", self.stop_move)
         self.title_label.bind("<B1-Motion>", self.do_move)
 
     def show_menu_button(self, event=None):
-        """Show menu when gear button is clicked"""
         try:
             x = self.root.winfo_rootx() + 10
             y = self.root.winfo_rooty() + 40
@@ -292,7 +289,6 @@ class SpectrumAnalyzer:
             self.menu_bar.grab_release()
 
     def set_frequency(self, freq_type, freq):
-        """Set min or max frequency and update UI"""
         if freq_type == 'min':
             self.MIN_FREQ = freq
             self.current_min_freq = freq
@@ -303,8 +299,6 @@ class SpectrumAnalyzer:
         self.update_frequency_settings()
 
     def update_frequency_settings(self):
-        """Update all frequency-dependent components"""
-        # Recalculate band centers
         self.band_centers = np.logspace(
             np.log10(self.MIN_FREQ),
             np.log10(self.MAX_FREQ),
@@ -312,7 +306,6 @@ class SpectrumAnalyzer:
         )
         self.filters = self.create_filters()
         
-        # Update menu checkmarks
         self.min_freq_menu.delete(0, tk.END)
         for f in self.available_min_freqs:
             self.min_freq_menu.add_command(
@@ -325,12 +318,10 @@ class SpectrumAnalyzer:
                 label=f"{f} Hz {'✓' if f == self.current_max_freq else ''}",
                 command=lambda freq=f: self.set_frequency('max', freq))
         
-        # Update frequency labels
         band_width = 10
         band_gap = 3
         bands_start_x = 10
         
-        # Update existing frequency labels
         label_index = 0
         for i in range(self.NUM_BANDS):
             if i % 2 == 0:
@@ -340,10 +331,8 @@ class SpectrumAnalyzer:
                 text = f"{freq/1000:.1f}K" if freq >= 1000 else f"{freq}"
                 
                 if label_index < len(self.freq_labels):
-                    # Update existing label
                     self.canvas.itemconfig(self.freq_labels[label_index], text=text)
                 else:
-                    # Create new label if needed
                     label = self.canvas.create_text(
                         (x1+x2)/2, 
                         215, 
@@ -356,7 +345,6 @@ class SpectrumAnalyzer:
                 
                 label_index += 1
 
-        # Remove any extra labels if we have fewer now
         while len(self.freq_labels) > label_index:
             self.canvas.delete(self.freq_labels.pop())
 
@@ -373,6 +361,7 @@ class SpectrumAnalyzer:
                 samplerate=self.SAMPLE_RATE,
                 channels=min(self.input_channels, 2),
                 blocksize=self.BLOCK_SIZE,
+                latency='low',
                 callback=self.audio_callback
             )
             self.audio_stream.start()
@@ -388,21 +377,24 @@ class SpectrumAnalyzer:
         
         indata = np.clip(indata, -1, 1)
         
-        # Convert to mono if needed
+        # Расчет общего RMS
         if indata.shape[1] >= 2:
             mono_signal = np.mean(indata, axis=1)
         else:
             mono_signal = indata[:, 0]
         
-        # Calculate RMS of entire signal
+        # Общий уровень без фильтрации
         rms = np.sqrt(np.mean(mono_signal**2))
         self.rms_level = 20 * np.log10(max(rms, 1e-6))
         
-        if self.rms_level > self.peak_rms:
-            self.peak_rms = self.rms_level
+        peak = np.max(np.abs(mono_signal))
+        peak_db = 20 * np.log10(max(peak, 1e-6))
+        
+        if peak_db > self.peak_rms:
+            self.peak_rms = peak_db
             self.peak_rms_hold_counter = int(self.PEAK_HOLD_TIME * 1000 / self.update_interval)
         
-        # Process each frequency band
+        # Обработка полос частот (для спектра)
         for i in range(self.NUM_BANDS):
             b, a = self.filters[i]
             try:
@@ -418,7 +410,7 @@ class SpectrumAnalyzer:
                 self.band_levels[i] = -self.LEVEL_RANGE
 
     def update_meter(self):
-        # Update RMS meter
+        # Обновление общего уровня
         if self.rms_level > self.smoothed_rms:
             self.smoothed_rms = self.rms_level
         else:
@@ -440,7 +432,7 @@ class SpectrumAnalyzer:
         def db_to_y(db):
             return 200 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
         
-        # Update RMS display
+        # Обновление RMS
         rms_y = db_to_y(self.smoothed_rms)
         peak_y = db_to_y(self.peak_rms)
         
@@ -448,7 +440,7 @@ class SpectrumAnalyzer:
         self.canvas.coords(
             self.rms_meter,
             rms_meter_x, rms_y,
-            rms_meter_x + 20, 200
+            rms_meter_x + 30, 200
         )
         
         color = 'red' if self.smoothed_rms > -6 else \
@@ -458,10 +450,10 @@ class SpectrumAnalyzer:
         self.canvas.coords(
             self.rms_peak_indicator,
             rms_meter_x, peak_y,
-            rms_meter_x + 20, peak_y
+            rms_meter_x + 30, peak_y
         )
 
-        # Update spectrum bands
+        # Обновление полос спектра
         for i in range(self.NUM_BANDS):
             if self.band_levels[i] > self.smoothed_levels[i]:
                 self.smoothed_levels[i] = self.band_levels[i]

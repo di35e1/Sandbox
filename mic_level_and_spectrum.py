@@ -52,8 +52,8 @@ class SpectrumAnalyzer:
         )
 
         # Level states
-        self.band_levels = [-self.LEVEL_RANGE] * self.NUM_BANDS
-        self.smoothed_levels = [-self.LEVEL_RANGE] * self.NUM_BANDS
+        self.band_levels = np.full(self.NUM_BANDS, -self.LEVEL_RANGE, dtype=np.float32)
+        self.smoothed_levels = np.full(self.NUM_BANDS, -self.LEVEL_RANGE, dtype=np.float32)
         self.peak_levels = np.zeros(self.NUM_BANDS)
         self.peak_hold_counters = np.zeros(self.NUM_BANDS)
 

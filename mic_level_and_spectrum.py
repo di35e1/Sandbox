@@ -12,6 +12,7 @@ class SpectrumAnalyzer:
         # Window parameters
         self.window_width = 515
         self.window_height = 280
+        self.compact_mode = False  # Track if we're in compact mode
 
         # Analysis parameters
         self.SAMPLE_RATE = 44100
@@ -72,8 +73,6 @@ class SpectrumAnalyzer:
             low = center_freq / (2**(1/6))
             high = center_freq * (2**(1/6))
             
-            # if i == 0 and self.MAX_FREQ == 20:
-            #     low = self.MIN_FREQ
             if i == self.NUM_BANDS - 1 and self.MAX_FREQ == 20000:
                 high = self.MAX_FREQ
 
@@ -82,7 +81,6 @@ class SpectrumAnalyzer:
                     b, a = signal.butter(2, [low, high], btype='bandpass', fs=self.SAMPLE_RATE)
                 else:
                     b, a = signal.butter(4, [low, high], btype='bandpass', fs=self.SAMPLE_RATE)
-                # b, a = signal.butter(4, [low, high], btype='bandpass', fs=self.SAMPLE_RATE)
                 filters.append((b, a))
             except:
                 filters.append(([1], [1]))
@@ -133,6 +131,9 @@ class SpectrumAnalyzer:
                 command=lambda f=freq: self.set_frequency('max', f)
             )
         self.menu_bar.add_cascade(label="Max Frequency", menu=self.max_freq_menu)
+
+        # Toggle analyzer visibility
+        self.menu_bar.add_command(label="Hide Analyzer", command=self.toggle_analyzer_visibility)
 
         # Gear icon button
         self.gear_canvas = tk.Canvas(
@@ -279,6 +280,114 @@ class SpectrumAnalyzer:
         self.title_label.bind("<ButtonPress-1>", self.start_move)
         self.title_label.bind("<ButtonRelease-1>", self.stop_move)
         self.title_label.bind("<B1-Motion>", self.do_move)
+
+    def toggle_analyzer_visibility(self):
+        self.compact_mode = not self.compact_mode
+        
+        if self.compact_mode:
+            # Hide all spectrum analyzer elements except RMS meter
+            for item in self.band_bars + self.peak_indicators + self.freq_labels + self.db_labels + self.db_lines:
+                self.canvas.itemconfig(item, state='hidden')
+
+            self.channel_label.place_forget()
+            
+            # Update window size
+            self.window_width = 100
+            self.window_height = 280
+            self.root.geometry(f"{self.window_width}x{self.window_height}")
+
+            x = self.root.winfo_x() + 415
+            y = self.root.winfo_y()
+            self.root.geometry(f"+{x}+{y}")
+
+            # dB scale compact
+            scale_start_x = 40
+            db_scale = [-1, -6, -12, -18, -24, -30, -35, -40, -45, -50, -55, -60]
+            
+            self.db_labels_compact = []
+            self.db_lines_compact = []
+            
+            for db in db_scale:
+                y_pos = 200 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
+                color = "red" if db >= -6 else "orange" if db >= -12 else "green"
+                
+                line = self.canvas.create_line(
+                    scale_start_x, y_pos, 
+                    scale_start_x + 10, y_pos,
+                    fill=color, 
+                    width=2
+                )
+                self.db_lines_compact.append(line)
+                
+                label = self.canvas.create_text(
+                    scale_start_x - 5, 
+                    y_pos, 
+                    text=f"{db}", 
+                    fill="white", 
+                    font=("Arial", 10), 
+                    anchor="e"
+                )
+                self.db_labels_compact.append(label)           
+            
+            # Reposition RMS meter
+            rms_meter_x = 60
+            self.canvas.coords(
+                self.rms_meter,
+                rms_meter_x, 200,
+                rms_meter_x + 15, 200
+            )
+            self.canvas.coords(
+                self.rms_peak_indicator,
+                rms_meter_x - 20, 200,
+                rms_meter_x + 15, 200
+            )
+            self.canvas.coords(
+                self.rms_label,
+                rms_meter_x + 10,
+                215,
+            )
+            
+            # Update menu item text
+            self.menu_bar.entryconfig(2, label="Show Analyzer")
+        else:
+            # Show all elements
+            for item in self.band_bars + self.peak_indicators + self.freq_labels + self.db_lines + self.db_labels:
+                self.canvas.itemconfig(item, state='normal')
+            
+            for item in self.db_lines_compact + self.db_labels_compact:
+                self.canvas.itemconfig(item, state='hidden')
+            
+            # Restore original window size
+            self.window_width = 515
+            self.window_height = 280
+            self.root.geometry(f"{self.window_width}x{self.window_height}")
+
+            x = self.root.winfo_x() - 415
+            y = self.root.winfo_y()
+            self.root.geometry(f"+{x}+{y}")
+
+            self.channel_label.place(x=40, y=15)
+
+            # Restore RMS meter position
+            rms_meter_x = 450 + 20
+            self.canvas.coords(
+                self.rms_meter,
+                rms_meter_x, 200,
+                rms_meter_x + 15, 200
+            )
+            self.canvas.coords(
+                self.rms_peak_indicator,
+                rms_meter_x - 20, 200,
+                rms_meter_x + 15, 200
+            )
+            self.canvas.coords(
+                self.rms_label,
+                rms_meter_x + 9,
+                215,
+            )
+            
+            # Update menu item text
+            self.menu_bar.entryconfig(2, label="Hide Analyzer")
 
     def show_menu_button(self, event=None):
         try:
@@ -430,17 +539,26 @@ class SpectrumAnalyzer:
             )
         
         def db_to_y(db):
-            return 200 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
+            if self.compact_mode:
+                return 200 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
+            else:
+                return 200 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
         
         # Обновление RMS
         rms_y = db_to_y(self.smoothed_rms)
         peak_y = db_to_y(self.peak_rms)
         
-        rms_meter_x = 450 + 20
+        if self.compact_mode:
+            rms_meter_x = 60
+            meter_height = 200
+        else:
+            rms_meter_x = 450 + 20
+            meter_height = 200
+        
         self.canvas.coords(
             self.rms_meter,
             rms_meter_x, rms_y,
-            rms_meter_x + 15, 200
+            rms_meter_x + 15, meter_height
         )
         
         color = 'red' if self.smoothed_rms > -6 else \
@@ -453,42 +571,43 @@ class SpectrumAnalyzer:
             rms_meter_x + 15, peak_y
         )
 
-        # Обновление полос спектра
-        for i in range(self.NUM_BANDS):
-            if self.band_levels[i] > self.smoothed_levels[i]:
-                self.smoothed_levels[i] = self.band_levels[i]
-            else:
-                decay_amount = self.DECAY_RATE * (self.update_interval/1000)
-                self.smoothed_levels[i] = max(
-                    self.smoothed_levels[i] - decay_amount, 
-                    -self.LEVEL_RANGE
+        if not self.compact_mode:
+            # Обновление полос спектра
+            for i in range(self.NUM_BANDS):
+                if self.band_levels[i] > self.smoothed_levels[i]:
+                    self.smoothed_levels[i] = self.band_levels[i]
+                else:
+                    decay_amount = self.DECAY_RATE * (self.update_interval/1000)
+                    self.smoothed_levels[i] = max(
+                        self.smoothed_levels[i] - decay_amount, 
+                        -self.LEVEL_RANGE
+                    )
+                
+                if self.peak_hold_counters[i] > 0:
+                    self.peak_hold_counters[i] -= 1
+                else:
+                    decay_amount = self.DECAY_RATE * 2 * (self.update_interval/1000)
+                    self.peak_levels[i] = max(
+                        self.peak_levels[i] - decay_amount, 
+                        -self.LEVEL_RANGE
+                    )
+                
+                rms_y = db_to_y(self.smoothed_levels[i])
+                peak_y = db_to_y(self.peak_levels[i])
+                
+                coords = self.canvas.coords(self.band_bars[i])
+                self.canvas.coords(self.band_bars[i], coords[0], rms_y, coords[2], 200)
+                
+                color = 'red' if self.smoothed_levels[i] > -6 else \
+                        'orange' if self.smoothed_levels[i] > -15 else 'green'
+                self.canvas.itemconfig(self.band_bars[i], fill=color)
+                
+                peak_coords = self.canvas.coords(self.peak_indicators[i])
+                self.canvas.coords(
+                    self.peak_indicators[i],
+                    peak_coords[0], peak_y,
+                    peak_coords[2], peak_y
                 )
-            
-            if self.peak_hold_counters[i] > 0:
-                self.peak_hold_counters[i] -= 1
-            else:
-                decay_amount = self.DECAY_RATE * 2 * (self.update_interval/1000)
-                self.peak_levels[i] = max(
-                    self.peak_levels[i] - decay_amount, 
-                    -self.LEVEL_RANGE
-                )
-            
-            rms_y = db_to_y(self.smoothed_levels[i])
-            peak_y = db_to_y(self.peak_levels[i])
-            
-            coords = self.canvas.coords(self.band_bars[i])
-            self.canvas.coords(self.band_bars[i], coords[0], rms_y, coords[2], 200)
-            
-            color = 'red' if self.smoothed_levels[i] > -6 else \
-                    'orange' if self.smoothed_levels[i] > -15 else 'green'
-            self.canvas.itemconfig(self.band_bars[i], fill=color)
-            
-            peak_coords = self.canvas.coords(self.peak_indicators[i])
-            self.canvas.coords(
-                self.peak_indicators[i],
-                peak_coords[0], peak_y,
-                peak_coords[2], peak_y
-            )
         
         self.root.after(self.update_interval, self.update_meter)
 
@@ -509,3 +628,4 @@ if __name__ == "__main__":
         app = SpectrumAnalyzer()
     except Exception as e:
         print(f"Application error: {e}")
+        

@@ -292,11 +292,11 @@ class SpectrumAnalyzer:
             self.channel_label.place_forget()
             
             # Update window size
-            self.window_width = 100
+            self.window_width = 95
             self.window_height = 280
             self.root.geometry(f"{self.window_width}x{self.window_height}")
 
-            x = self.root.winfo_x() + 415
+            x = self.root.winfo_x() + 420
             y = self.root.winfo_y()
             self.root.geometry(f"+{x}+{y}")
 
@@ -343,7 +343,7 @@ class SpectrumAnalyzer:
             )
             self.canvas.coords(
                 self.rms_label,
-                rms_meter_x + 10,
+                rms_meter_x + 9,
                 215,
             )
             
@@ -362,7 +362,7 @@ class SpectrumAnalyzer:
             self.window_height = 280
             self.root.geometry(f"{self.window_width}x{self.window_height}")
 
-            x = self.root.winfo_x() - 415
+            x = self.root.winfo_x() - 420
             y = self.root.winfo_y()
             self.root.geometry(f"+{x}+{y}")
 

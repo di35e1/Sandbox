@@ -1,7 +1,10 @@
 import sounddevice as sd
+import subprocess
 import numpy as np
 import tkinter as tk
 from tkinter import font as tkfont
+import sys
+import os
 
 class AudioLevelMeter:
     def __init__(self):
@@ -21,7 +24,7 @@ class AudioLevelMeter:
 
         # Параметры окна (ширина зависит от количества каналов)
         self.window_width = 70 if self.input_channels == 1 else 120
-        self.window_height = 280
+        self.window_height = 300  # Увеличили высоту для кнопки
         
         # Калибровка уровней
         self.LEVEL_RANGE = 60  # Диапазон 60 dB
@@ -82,6 +85,57 @@ class AudioLevelMeter:
                 channel_label = "L" if i == 0 else "R"
                 canvas = self.create_meter(self.meter_frame, channel_label)
                 self.canvases.append(canvas)
+        
+        # Добавляем кнопку перезапуска
+        # Создаем canvas для кнопки
+        self.button_canvas = tk.Canvas(
+            self.root,
+            width=self.window_width,
+            height=22,
+            bg='black',
+            highlightthickness=0
+        )
+        self.button_canvas.pack(pady=6)
+
+        # Рисуем прямоугольник кнопки
+        button_width = self.window_width - 10
+        button_height = 16
+        x_center = self.window_width // 2
+        x1 = x_center - button_width // 2
+        x2 = x_center + button_width // 2
+
+        self.button_bg = self.button_canvas.create_rectangle(
+            x1, 0, x2, button_height,
+            fill='#000000',
+            outline="#333333",
+            width=1
+        )
+
+        # Текст кнопки
+        self.button_text = self.button_canvas.create_text(
+            x_center, button_height // 2,
+            text="Close",
+            fill='#555555',
+            font=("Helvetica", 10)
+        )
+
+        # Привязываем события мыши
+        self.button_canvas.bind("<Button-1>", self.on_button_click)
+        self.button_canvas.bind("<Enter>", self.on_button_enter)
+        self.button_canvas.bind("<Leave>", self.on_button_leave)
+
+    # Методы для обработки событий кнопки
+    def on_button_click(self, event):
+        self.button_canvas.itemconfig(self.button_bg, fill="#555555")
+        self.close_program()
+
+    def on_button_enter(self, event):
+        self.button_canvas.itemconfig(self.button_bg, fill='red')
+        self.button_canvas.itemconfig(self.button_text, fill='white')
+
+    def on_button_leave(self, event):
+        self.button_canvas.itemconfig(self.button_bg, fill='#000000')
+        self.button_canvas.itemconfig(self.button_text, fill='#555555')        
 
     def create_meter(self, parent, channel):
         """Создает VU-метр для указанного канала"""
@@ -217,6 +271,48 @@ class AudioLevelMeter:
         x = self.root.winfo_x() + (event.x - self.drag_data["x"])
         y = self.root.winfo_y() + (event.y - self.drag_data["y"])
         self.root.geometry(f"+{x}+{y}")
+
+    def restart_program(self):
+        """Перезапускает программу"""
+        try:
+            if hasattr(self, 'audio_stream'):
+                self.audio_stream.stop()
+                self.audio_stream.close()
+        except:
+            pass
+
+        self.root.destroy()
+        subprocess.Popen([sys.executable, __file__])
+        sys.exit(0)
+
+    def close_program(self):
+        """Корректно закрывает программу"""
+        try:
+            # Останавливаем аудиопоток
+            if hasattr(self, 'audio_stream') and self.audio_stream:
+                self.audio_stream.stop()
+                self.audio_stream.close()
+        except Exception as e:
+            print(f"Error closing audio stream: {e}")
+        
+        try:
+            # Останавливаем все обновления интерфейса
+            self.root.after_cancel(self.update_meter)
+        except:
+            pass
+        
+        try:
+            # Закрываем окно
+            self.root.destroy()
+        except:
+            pass
+        
+        try:
+            # Принудительно завершаем программу
+            sys.exit(0)
+        except:
+            os._exit(0)  # Аварийный выход если sys.exit не сработал
+
 
 if __name__ == "__main__":
     try:

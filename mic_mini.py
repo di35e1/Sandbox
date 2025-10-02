@@ -141,15 +141,16 @@ class AudioLevelMeter:
         """Создает VU-метр для указанного канала"""
         channel_frame = tk.Frame(parent, bg='black')
         channel_frame.pack(side=tk.LEFT, padx=7)
-        
-        tk.Label(
+                
+        channel_label = tk.Label(
             channel_frame, 
             text=channel, 
             bg='black', 
             fg='yellow', 
             font=("Arial", 8)
-        ).pack(pady=0)
-        
+        )
+        channel_label.pack(pady=0)
+
         canvas = tk.Canvas(
             channel_frame, 
             width=40, 
@@ -158,6 +159,8 @@ class AudioLevelMeter:
             highlightthickness=0
         )
         canvas.pack(pady=0)
+
+        canvas.channel_label = channel_label
 
         db_scale = [-1, -6, -12, -18, -24, -30, -35, -40, -45, -50, -55, -60]
         for db in db_scale:
@@ -221,9 +224,22 @@ class AudioLevelMeter:
                 self.peak_hold_counter[channel] = int(self.PEAK_HOLD_TIME * 1000 / self.update_interval)
 
     def update_meter(self):
+
+        # Проверяем превышение уровня и обновляем цвет фона
+        level_exceeded_title = any(level > -6 for level in self.peak_level)
+        new_color = 'red' if level_exceeded_title else 'lightgray'
+        if new_color != self.title_label.cget('fg'):
+            self.title_label.configure(fg=new_color)
+
         for channel in range(self.input_channels):
             canvas = self.canvases[channel]
-            
+
+            # Проверяем превышение уровня для текущего канала и обновляем цвет channel_label
+            level_exceeded_channel = self.peak_level[channel] > -6
+            new_color = 'red' if level_exceeded_channel else 'yellow'
+            if new_color != canvas.channel_label.cget('fg'):
+                canvas.channel_label.config(fg=new_color)
+
             if self.rms_level[channel] > self.smoothed_level[channel]:
                 self.smoothed_level[channel] = self.rms_level[channel]
             else:

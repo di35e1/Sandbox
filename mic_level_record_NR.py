@@ -29,12 +29,12 @@ class AudioLevelMeter:
 
         # Параметры окна (ширина зависит от количества каналов)
         self.window_width = 70 if self.input_channels == 1 else 120
-        self.window_height = 350  # Увеличиваем высоту для кнопки
+        self.window_height = 350
 
         # Калибровка уровней
-        self.LEVEL_RANGE = 60  # Диапазон 60 dB
-        self.PEAK_HOLD_TIME = 1 # Удержание пика (сек)
-        self.DECAY_RATE = 25  # Скорость затухания (dB/сек)
+        self.LEVEL_RANGE = 60
+        self.PEAK_HOLD_TIME = 1
+        self.DECAY_RATE = 25
         
         # Состояние уровней
         self.peak_level = [-self.LEVEL_RANGE] * self.input_channels
@@ -43,32 +43,32 @@ class AudioLevelMeter:
         self.last_peak_time = [0] * self.input_channels
         self.peak_hold_counter = [0] * self.input_channels
         
-        # Состояние мониторинга
-        self.monitoring = False
-        self.output_stream = None
-        self.audio_buffer = deque(maxlen=10)  # Буфер для аудиоданных
-        self.buffer_lock = threading.Lock()
-        
         # Состояние записи
         self.recording = False
         self.audio_file = None
         self.recording_start_time = 0
         self.recorded_data = []
-        self.bullet_visible = False  # Состояние мигающего буллета
-        
+        self.bullet_visible = False
+        # Таймер записи
+        self.recording_timer = None
+        self.recording_elapsed = 0
+
         # Шумоподавление
         self.noise_reduction = False
         self.noise_profile = None
         self.noise_profile_captured = False
         self.noise_capture_frames = 0
-        self.NOISE_PROFILE_DURATION = 3.0  # Увеличим время захвата профиля
-        self.noise_samples = []  # Буфер для накопления samples шума
+        self.NOISE_PROFILE_DURATION = 3.0
+        self.noise_samples = []
+        self.profile_capture_start = None
+        self.nr_prop_decrease =  .7  # Степень подавления шума (0.0 - 1.0)
+        self.nr_stationary = True    # Режим для стационарного шума
         
         self.setup_window()
         self.setup_ui()
         self.setup_audio()
         
-        self.update_interval = 30  # мс
+        self.update_interval = 30
         self.root.after(self.update_interval, self.update_meter)
         self.root.mainloop()
 
@@ -82,7 +82,7 @@ class AudioLevelMeter:
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         x = screen_width - (120 if self.input_channels == 1 else 200)
-        y = (screen_height - 440) ##self.window_height) // 2
+        y = (screen_height - 440)
         self.root.geometry(f"+{x}+{y}")
 
     def setup_ui(self):
@@ -105,7 +105,6 @@ class AudioLevelMeter:
         self.meter_frame = tk.Frame(self.root, bg='black')
         self.meter_frame.pack()
         
-        # Создаем индикаторы в зависимости от количества каналов
         self.canvases = []
         if self.input_channels == 1:
             channel_label = "Mono"
@@ -117,7 +116,6 @@ class AudioLevelMeter:
                 canvas = self.create_meter(self.meter_frame, channel_label)
                 self.canvases.append(canvas)
 
-        # Добавляем кнопки
         self.buttons_frame = tk.Frame(self.root, bg='black')
         self.buttons_frame.pack(pady=5)
 
@@ -163,7 +161,6 @@ class AudioLevelMeter:
         x1 = x_center - button_width // 2
         x2 = x_center + button_width // 2
 
-        # Рисуем прямоугольник кнопки
         button_bg = canvas.create_rectangle(
             x1, 0, x2, button_height,
             fill='#000000',
@@ -171,17 +168,15 @@ class AudioLevelMeter:
             width=1
         )
 
-        # Индикатор состояния (зеленая точка когда включено)
         indicator_size = 3
         indicator_x = x_center - button_width // 2 + 8
         indicator_y = button_height // 2
         indicator = canvas.create_oval(
             indicator_x - indicator_size, indicator_y - indicator_size,
             indicator_x + indicator_size, indicator_y + indicator_size,
-            fill='#333333', outline=''  # Серый когда выключено
+            fill='#333333', outline=''
         )
 
-        # Текст кнопки
         button_text = canvas.create_text(
             x_center+3, button_height // 2,
             text="NR OFF",
@@ -189,13 +184,11 @@ class AudioLevelMeter:
             font=("Helvetica", 9)
         )
 
-        # Сохраняем ссылки на элементы
         canvas.button_bg = button_bg
         canvas.button_text = button_text
         canvas.indicator = indicator
         canvas.command = self.toggle_noise_reduction
 
-        # Привязываем события мыши
         canvas.bind("<Button-1>", self.on_button_click)
         canvas.bind("<Enter>", self.on_noise_button_enter)
         canvas.bind("<Leave>", self.on_noise_button_leave)
@@ -205,25 +198,26 @@ class AudioLevelMeter:
         self.noise_reduction = not self.noise_reduction
         
         if self.noise_reduction:
-            # Сбрасываем профиль шума для нового захвата
+            # Сбрасываем профиль шума
             self.noise_profile = None
             self.noise_profile_captured = False
             self.noise_capture_frames = 0
-            self.noise_samples = []  # Очищаем буфер samples
+            self.noise_samples = []
+            self.profile_capture_start = time.time()
             
             # Обновляем внешний вид кнопки
             self.noise_reduction_button_canvas.itemconfig(
                 self.noise_reduction_button_canvas.button_text, 
-                text="listening",
+                text="learning",
                 fill='yellow'
             )
             self.noise_reduction_button_canvas.itemconfig(
                 self.noise_reduction_button_canvas.indicator,
-                fill='yellow'  # Желтый во время захвата
+                fill='yellow'
             )
             self.noise_reduction_button_canvas.itemconfig(
                 self.noise_reduction_button_canvas.button_bg,
-                fill='#333300'  # Темно-желтый фон
+                fill='#333300'
             )
             print("Noise reduction enabled - capturing noise profile...")
         else:
@@ -235,11 +229,11 @@ class AudioLevelMeter:
             )
             self.noise_reduction_button_canvas.itemconfig(
                 self.noise_reduction_button_canvas.indicator,
-                fill='#333333'  # Серый когда выключено
+                fill='#333333'
             )
             self.noise_reduction_button_canvas.itemconfig(
                 self.noise_reduction_button_canvas.button_bg,
-                fill='#000000'  # Черный фон
+                fill='#000000'
             )
             print("Noise reduction disabled")
 
@@ -248,11 +242,11 @@ class AudioLevelMeter:
         canvas = event.widget
         if self.noise_reduction:
             if not self.noise_profile_captured:
-                canvas.itemconfig(canvas.button_bg, fill='#444400')  # Более светлый желтый
+                canvas.itemconfig(canvas.button_bg, fill='#444400')
             else:
-                canvas.itemconfig(canvas.button_bg, fill='#004400')  # Более светлый зеленый
+                canvas.itemconfig(canvas.button_bg, fill='#004400')
         else:
-            canvas.itemconfig(canvas.button_bg, fill='#330000')  # Темно-красный
+            canvas.itemconfig(canvas.button_bg, fill='#330000')
         canvas.itemconfig(canvas.button_text, fill='white')
 
     def on_noise_button_leave(self, event):
@@ -260,13 +254,13 @@ class AudioLevelMeter:
         canvas = event.widget
         if self.noise_reduction:
             if not self.noise_profile_captured:
-                canvas.itemconfig(canvas.button_bg, fill='#333300')  # Темно-желтый
+                canvas.itemconfig(canvas.button_bg, fill='#333300')
                 canvas.itemconfig(canvas.button_text, fill='yellow')
             else:
-                canvas.itemconfig(canvas.button_bg, fill='#003300')  # Темно-зеленый
+                canvas.itemconfig(canvas.button_bg, fill='#003300')
                 canvas.itemconfig(canvas.button_text, fill='white')
         else:
-            canvas.itemconfig(canvas.button_bg, fill='#000000')  # Черный
+            canvas.itemconfig(canvas.button_bg, fill='#000000')
             canvas.itemconfig(canvas.button_text, fill='#555555')
 
     def setup_record_button(self):
@@ -278,7 +272,6 @@ class AudioLevelMeter:
         x1 = x_center - button_width // 2
         x2 = x_center + button_width // 2
 
-        # Рисуем прямоугольник кнопки
         button_bg = canvas.create_rectangle(
             x1, 0, x2, button_height,
             fill='#000000',
@@ -286,7 +279,6 @@ class AudioLevelMeter:
             width=1
         )
 
-        # Красный буллет (изначально невидимый)
         bullet_size = 3
         bullet_x = x_center
         bullet_y = button_height // 2
@@ -295,9 +287,8 @@ class AudioLevelMeter:
             bullet_x + bullet_size, bullet_y + bullet_size,
             fill='red', outline=''
         )
-        canvas.itemconfig(bullet, state='hidden')  # Скрываем изначально
+        canvas.itemconfig(bullet, state='hidden')
 
-        # Текст кнопки
         button_text = canvas.create_text(
             x_center, button_height // 2,
             text="Record",
@@ -305,13 +296,11 @@ class AudioLevelMeter:
             font=("Helvetica", 10)
         )
 
-        # Сохраняем ссылки на элементы
         canvas.button_bg = button_bg
         canvas.button_text = button_text
         canvas.bullet = bullet
         canvas.command = self.toggle_record
 
-        # Привязываем события мыши
         canvas.bind("<Button-1>", self.on_button_click)
         canvas.bind("<Enter>", self.on_button_enter)
         canvas.bind("<Leave>", self.on_button_leave)
@@ -324,7 +313,6 @@ class AudioLevelMeter:
         x1 = x_center - button_width // 2
         x2 = x_center + button_width // 2
 
-        # Рисуем прямоугольник кнопки
         button_bg = canvas.create_rectangle(
             x1, 0, x2, button_height,
             fill='#000000',
@@ -332,7 +320,6 @@ class AudioLevelMeter:
             width=1
         )
 
-        # Текст кнопки
         button_text = canvas.create_text(
             x_center, button_height // 2,
             text=text,
@@ -340,12 +327,10 @@ class AudioLevelMeter:
             font=("Helvetica", 10)
         )
 
-        # Сохраняем ссылки на элементы
         canvas.button_bg = button_bg
         canvas.button_text = button_text
         canvas.command = command
 
-        # Привязываем события мыши
         canvas.bind("<Button-1>", self.on_button_click)
         canvas.bind("<Enter>", self.on_button_enter)
         canvas.bind("<Leave>", self.on_button_leave)
@@ -378,49 +363,54 @@ class AudioLevelMeter:
             canvas.itemconfig(canvas.button_text, fill='#555555')
 
     def toggle_bullet(self):
-        """Переключает видимость красного буллета для создания мигания"""
+        """Переключает видимость красного буллета"""
         if self.recording:
             self.bullet_visible = not self.bullet_visible
             if self.bullet_visible:
                 self.record_button_canvas.itemconfig(self.record_button_canvas.bullet, state='normal')
             else:
                 self.record_button_canvas.itemconfig(self.record_button_canvas.bullet, state='hidden')
-            
-            # Запланировать следующее переключение через 500 мс
             self.root.after(500, self.toggle_bullet)
 
     def capture_noise_profile(self, audio_data):
-        """Захватывает профиль шума из первых нескольких секунд аудио"""
-        if self.noise_profile_captured:
+        """Захватывает профиль шума"""
+        if self.noise_profile_captured or not self.noise_reduction:
             return
             
-        # Накопление samples для профиля шума
-        self.noise_samples.append(audio_data.copy())
-        
-        # Проверяем, набрали ли достаточно данных
-        total_samples = len(self.noise_samples) * audio_data.shape[0]
-        required_samples = int(self.NOISE_PROFILE_DURATION * self.sample_rate)
-        
-        if total_samples >= required_samples:
-            # Объединяем все накопленные samples
-            self.noise_profile = np.concatenate(self.noise_samples, axis=0)
-            self.noise_profile_captured = True
+        # Простой захват профиля по времени
+        if self.profile_capture_start is None:
+            self.profile_capture_start = time.time()
             
-            # Обновляем кнопку
-            self.noise_reduction_button_canvas.itemconfig(
-                self.noise_reduction_button_canvas.button_text, 
-                text="NR ON",
-                fill='white'
-            )
-            self.noise_reduction_button_canvas.itemconfig(
-                self.noise_reduction_button_canvas.indicator,
-                fill='green'  # Зеленый когда готово
-            )
-            self.noise_reduction_button_canvas.itemconfig(
-                self.noise_reduction_button_canvas.button_bg,
-                fill='#003300'  # Темно-зеленый фон
-            )
-            print("Noise profile captured successfully!")
+        elapsed = time.time() - self.profile_capture_start
+        
+        if elapsed < self.NOISE_PROFILE_DURATION:
+            # Накопление samples
+            self.noise_samples.append(audio_data.copy())
+        else:
+            # Захват завершен
+            try:
+                if len(self.noise_samples) > 0:
+                    self.noise_profile = np.concatenate(self.noise_samples, axis=0)
+                    self.noise_profile_captured = True
+                    
+                    # Обновляем кнопку
+                    self.noise_reduction_button_canvas.itemconfig(
+                        self.noise_reduction_button_canvas.button_text, 
+                        text="NR ON",
+                        fill='white'
+                    )
+                    self.noise_reduction_button_canvas.itemconfig(
+                        self.noise_reduction_button_canvas.indicator,
+                        fill='green'
+                    )
+                    self.noise_reduction_button_canvas.itemconfig(
+                        self.noise_reduction_button_canvas.button_bg,
+                        fill='#003300'
+                    )
+                    print("Noise profile captured successfully!")
+            except Exception as e:
+                print(f"Error capturing noise profile: {e}")
+                self.noise_reduction = False
 
     def apply_noise_reduction(self, audio_data):
         """Применяет шумоподавление к аудиоданным"""
@@ -428,39 +418,48 @@ class AudioLevelMeter:
             return audio_data
             
         try:
-            # Если профиль шума еще не захвачен, продолжаем захват
+            # Если профиль еще не захвачен, продолжаем захват
             if not self.noise_profile_captured:
                 self.capture_noise_profile(audio_data)
-                return audio_data  # Пока не применяем подавление
+                return audio_data
             
-            # Применяем шумоподавление с захваченным профилем
-            # Для многоканального аудио обрабатываем каждый канал отдельно
+            # Проверяем, что у нас есть профиль шума
+            if self.noise_profile is None or len(self.noise_profile) == 0:
+                return audio_data
+            
+            # Упрощенное шумоподавление с проверками
             if self.input_channels == 1:
-                reduced_noise = nr.reduce_noise(
+                # Моно аудио
+                audio_clean = nr.reduce_noise(
                     y=audio_data.flatten(),
                     sr=self.sample_rate,
-                    y_noise=self.noise_profile.flatten(),
-                    prop_decrease=0.6,
-                    stationary=False ## True для постояного предсказуемого шума
+                    y_noise=self.noise_profile.flatten() if len(self.noise_profile.flatten()) > 0 else audio_data.flatten(),
+                    prop_decrease=self.nr_prop_decrease,
+                    stationary=self.nr_stationary
                 )
-                return reduced_noise.reshape(-1, 1)
+                return audio_clean.reshape(-1, 1)
             else:
-                # Для стерео обрабатываем каждый канал отдельно
+                # Стерео аудио - обрабатываем каждый канал
                 processed_channels = []
-                for channel in range(self.input_channels):
-                    reduced_channel = nr.reduce_noise(
-                        y=audio_data[:, channel],
+                for ch in range(self.input_channels):
+                    # Берем часть профиля шума для этого канала
+                    noise_channel = self.noise_profile[:, ch] if self.noise_profile.shape[1] > ch else self.noise_profile[:, 0]
+                    
+                    audio_clean = nr.reduce_noise(
+                        y=audio_data[:, ch],
                         sr=self.sample_rate,
-                        y_noise=self.noise_profile[:, channel],
-                        prop_decrease=0.8,
-                        stationary=True
+                        y_noise=noise_channel,
+                        prop_decrease=self.nr_prop_decrease,
+                        stationary=self.nr_stationary
                     )
-                    processed_channels.append(reduced_channel)
+                    processed_channels.append(audio_clean)
                 
                 return np.column_stack(processed_channels)
-            
+                
         except Exception as e:
             print(f"Noise reduction error: {e}")
+            # Отключаем шумоподавление при ошибке
+            self.noise_reduction = False
             return audio_data
 
     def toggle_record(self):
@@ -472,10 +471,9 @@ class AudioLevelMeter:
                 desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
                 filename = os.path.join(desktop_path, f"Record {timestamp}.wav")
                 
-                # Создаем WAV файл и сразу начинаем писать
                 self.audio_file = wave.open(filename, 'wb')
                 self.audio_file.setnchannels(self.input_channels)
-                self.audio_file.setsampwidth(2)  # 16-bit
+                self.audio_file.setsampwidth(2)
                 self.audio_file.setframerate(self.sample_rate)
                 
                 self.recording = True
@@ -488,10 +486,11 @@ class AudioLevelMeter:
                     self.noise_profile_captured = False
                     self.noise_capture_frames = 0
                     self.noise_samples = []
-                    # Обновляем кнопку для отображения захвата профиля
+                    self.profile_capture_start = time.time()
+                    
                     self.noise_reduction_button_canvas.itemconfig(
                         self.noise_reduction_button_canvas.button_text, 
-                        text="listening",
+                        text="learning",
                         fill='yellow'
                     )
                     self.noise_reduction_button_canvas.itemconfig(
@@ -517,10 +516,8 @@ class AudioLevelMeter:
             # Останавливаем запись
             try:
                 self.recording = False
-                # Останавливаем мигание буллета
                 self.record_button_canvas.itemconfig(self.record_button_canvas.bullet, state='hidden')
                 
-                # Закрываем файл
                 if self.audio_file:
                     self.audio_file.close()
                     self.audio_file = None
@@ -587,14 +584,13 @@ class AudioLevelMeter:
 
     def setup_audio(self):
         try:
-            # Получаем частоту дискретизации устройства по умолчанию
             device_info = sd.query_devices(sd.default.device[0])
-            self.sample_rate = device_info['default_samplerate']
+            self.sample_rate = int(device_info['default_samplerate'])
             
             print(f"Using device sample rate: {self.sample_rate} Hz")
             
             self.audio_stream = sd.InputStream(
-                samplerate=self.sample_rate,  # Используем "родную" частоту устройства
+                samplerate=self.sample_rate,
                 channels=self.input_channels,
                 blocksize=1024,
                 callback=self.audio_callback
@@ -614,16 +610,15 @@ class AudioLevelMeter:
         if self.noise_reduction:
             processed_data = self.apply_noise_reduction(indata)
 
-        # Записываем обработанные данные в файл
+        # Записываем данные в файл
         if self.recording and self.audio_file:
             try:
-                # Используем обработанные данные для записи
                 audio_data_int16 = (processed_data * 32767).astype(np.int16)
                 self.audio_file.writeframes(audio_data_int16.tobytes())
             except Exception as e:
                 print(f"Error writing to audio file: {e}")
         
-        # Используем обработанные данные для отображения уровней
+        # Обновляем уровни
         for channel in range(self.input_channels):
             channel_data = processed_data[:, channel]
             rms = np.sqrt(np.mean(channel_data**2))
@@ -638,7 +633,6 @@ class AudioLevelMeter:
                 self.peak_hold_counter[channel] = int(self.PEAK_HOLD_TIME * 1000 / self.update_interval)
 
     def update_meter(self):
-        # Проверяем превышение уровня и обновляем цвет фона
         level_exceeded_title = any(level > -3 for level in self.peak_level)
         new_color = 'red' if level_exceeded_title else 'black'
         if new_color != self.title_label.cget('bg'):
@@ -647,7 +641,6 @@ class AudioLevelMeter:
         for channel in range(self.input_channels):
             canvas = self.canvases[channel]
 
-            # Проверяем превышение уровня для текущего канала и обновляем цвет channel_label
             level_exceeded_channel = self.peak_level[channel] > -6
             new_color = 'red' if level_exceeded_channel else 'orange'
             if new_color != canvas.channel_label.cget('fg'):
@@ -704,14 +697,12 @@ class AudioLevelMeter:
     def close_program(self):
         """Корректно закрывает программу"""
         try:
-            # Останавливаем запись если активна
             if self.recording:
                 self.recording = False
                 if self.audio_file:
                     self.audio_file.close()
                     self.audio_file = None
             
-            # Останавливаем аудиопотоки
             if hasattr(self, 'audio_stream') and self.audio_stream:
                 self.audio_stream.stop()
                 self.audio_stream.close()
@@ -722,22 +713,19 @@ class AudioLevelMeter:
             print(f"Error closing audio streams: {e}")
         
         try:
-            # Останавливаем все обновления интерфейса
             self.root.after_cancel(self.update_meter)
         except:
             pass
         
         try:
-            # Закрываем окно
             self.root.destroy()
         except:
             pass
         
         try:
-            # Принудительно завершаем программу
             sys.exit(0)
         except:
-            os._exit(0)  # Аварийный выход если sys.exit не сработал
+            os._exit(0)
 
 
 if __name__ == "__main__":

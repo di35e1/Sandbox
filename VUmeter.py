@@ -3,17 +3,15 @@ import subprocess
 import numpy as np
 import tkinter as tk
 from tkinter import font as tkfont
-import sys
 import os
-import threading
 from collections import deque
 import wave
-import time
+import datetime
 
 class AudioLevelMeter:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Audio Level Meter")
+        self.root.title("VU Meter")
         self.root.config(menu=tk.Menu(self.root))
 
         # Window movement handlers
@@ -39,7 +37,6 @@ class AudioLevelMeter:
         self.peak_level = [-self.LEVEL_RANGE] * self.input_channels
         self.rms_level = [-self.LEVEL_RANGE] * self.input_channels
         self.smoothed_level = [-self.LEVEL_RANGE] * self.input_channels
-        self.last_peak_time = [0] * self.input_channels
         self.peak_hold_counter = [0] * self.input_channels
         
         # Состояние записи
@@ -47,7 +44,6 @@ class AudioLevelMeter:
         self.audio_file = None
         self.recording_start_time = 0
         self.recorded_data = []
-        self.bullet_visible = False
 
         self.setup_window()
         self.setup_ui()
@@ -101,7 +97,7 @@ class AudioLevelMeter:
                 canvas = self.create_indicator(self.indicators_frame, channel_label)
                 self.canvases.append(canvas)
         
-        # Создаем общую шкалу справа
+        # Создаем шкалу
         self.scale_canvas = self.create_scale(self.meter_frame)
 
         self.buttons_frame = tk.Frame(self.root, bg='black')
@@ -141,7 +137,7 @@ class AudioLevelMeter:
         self.setup_button(self.close_button_canvas, "Close", self.close_program)
 
     def create_indicator(self, parent, channel):
-        """Создает индикатор уровня для указанного канала без шкалы"""
+        """Создает индикатор уровня для указанного канала"""
         channel_frame = tk.Frame(parent, bg='black')
         channel_frame.pack(side=tk.LEFT, padx=(2,1))
                 
@@ -165,9 +161,9 @@ class AudioLevelMeter:
 
         canvas.channel_label = channel_label
         
-        # Создаем только индикатор уровня (полоску)
+        # RMS индикатор
         canvas.level_bar = canvas.create_rectangle(
-            0, 220, 10, 220,  # Занимает почти всю ширину canvas
+            0, 220, 10, 220,
             fill='green', 
             outline='white', 
             width=0
@@ -183,7 +179,7 @@ class AudioLevelMeter:
         return canvas
 
     def create_scale(self, parent):
-        """Создает общую шкалу уровней справа"""
+        """Создает шкалу"""
         scale_frame = tk.Frame(parent, bg='black')
         scale_frame.pack(side=tk.LEFT, padx=(0,0))
 
@@ -253,7 +249,7 @@ class AudioLevelMeter:
         canvas.bind("<Leave>", self.on_button_leave)
 
     def setup_button(self, canvas, text, command):
-        """Настраивает обычную кнопку без буллета"""
+        """Настраивает обычную кнопку"""
         button_width = canvas.winfo_reqwidth() - 10
         button_height = canvas.winfo_reqheight() - 4 
         x_center = self.window_width // 2
@@ -290,8 +286,7 @@ class AudioLevelMeter:
     def on_button_enter(self, event):
         canvas = event.widget
         if canvas == self.close_button_canvas or canvas == self.settings_button_canvas:
-            color = 'black'
-            canvas.itemconfig(canvas.button_text, fill='white')
+            color = '#555555'
         elif canvas == self.record_button_canvas and self.recording:
             canvas.itemconfig(canvas.button_text, fill='white')
             canvas.itemconfig(canvas.button_text, text="STOP")
@@ -314,17 +309,17 @@ class AudioLevelMeter:
         """Форматирует время записи в формат ММ:СС или ЧЧ:ММ:СС"""
         if not self.recording:
             return ""
-        elapsed = int(time.time() - self.recording_start_time)
+        current_time = datetime.datetime.now()
+        time_difference = (current_time - self.recording_start_time)
+        elapsed = int(time_difference.total_seconds())
         hours = elapsed // 3600
         minutes = (elapsed % 3600) // 60
         seconds = elapsed % 60
         
         if hours > 0 or minutes >= 60:
-            # Показываем часы только если прошло больше 59 минут
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         else:
-            # Показываем только минуты и секунды
-            return f"{minutes:02d}:{seconds:02d}"
+            return f"{minutes:02d}m {seconds:02d}s"
 
     def update_recording_time(self):
         """Обновляет отображение времени записи"""
@@ -340,9 +335,14 @@ class AudioLevelMeter:
         if not self.recording:
             # Начинаем запись
             try:
-                timestamp = time.strftime("%H-%M %d%m%Y")
-                desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-                filename = os.path.join(desktop_path, f"Record {timestamp}.wav")
+                now = datetime.datetime.now()
+                timestamp = now.strftime("%H-%M-%S %d%m%Y")
+                date_str = now.strftime("%A %d%m%y")
+                base_records_path = os.path.join(os.path.expanduser("~"), "Records")
+                records_path = os.path.join(base_records_path, date_str)
+
+                os.makedirs(records_path, exist_ok=True)
+                filename = os.path.join(records_path, f"Record {timestamp}.wav")
                 
                 self.audio_file = wave.open(filename, 'wb')
                 self.audio_file.setnchannels(self.input_channels)
@@ -350,11 +350,12 @@ class AudioLevelMeter:
                 self.audio_file.setframerate(self.sample_rate)
                 
                 self.recording = True
-                self.recording_start_time = time.time()
-                self.record_button_canvas.itemconfig(self.record_button_canvas.button_text, text="00:00:00")
+                self.recording_start_time = now
                 
                 # Запускаем обновление времени записи
                 self.update_recording_time()
+                self.record_button_canvas.itemconfig(self.record_button_canvas.button_text, fill='white')
+                self.record_button_canvas.itemconfig(self.record_button_canvas.button_bg, fill='#550000')
                 print(f"Recording started: {filename}")
 
             except Exception as e:
@@ -371,6 +372,7 @@ class AudioLevelMeter:
                 
                 self.record_button_canvas.itemconfig(self.record_button_canvas.button_text, text="Record")
                 self.record_button_canvas.itemconfig(self.record_button_canvas.button_text, fill='#555555')
+                self.record_button_canvas.itemconfig(self.record_button_canvas.button_bg, fill='black')
             except Exception as e:
                 print(f"Error stopping recording: {e}")
 
@@ -378,16 +380,15 @@ class AudioLevelMeter:
         try:
             device_info = sd.query_devices(sd.default.device[0])
             self.sample_rate = int(device_info['default_samplerate'])
-            
             print(f"Using device sample rate: {self.sample_rate} Hz")
-            
             self.audio_stream = sd.InputStream(
                 samplerate=self.sample_rate,
                 channels=self.input_channels,
                 blocksize=1024,
-                callback=self.audio_callback
+                callback=self.audio_callback,
             )
             self.audio_stream.start()
+
         except Exception as e:
             print(f"Audio error: {e}")
             self.root.destroy()
@@ -397,19 +398,17 @@ class AudioLevelMeter:
         if status:
             print(status)
 
-        processed_data = indata.copy()
-
-        # Записываем данные в файл
+        # Записываем данные в файл, WAV 16bit
         if self.recording and self.audio_file:
             try:
-                audio_data_int16 = (processed_data * 32767).astype(np.int16)
+                audio_data_int16 = (indata * 32767).astype(np.int16)
                 self.audio_file.writeframes(audio_data_int16.tobytes())
             except Exception as e:
                 print(f"Error writing to audio file: {e}")
         
         # Обновляем уровни
         for channel in range(self.input_channels):
-            channel_data = processed_data[:, channel]
+            channel_data = indata[:, channel]
             rms = np.sqrt(np.mean(channel_data**2))
             self.rms_level[channel] = 20 * np.log10(max(rms, 10**(-60/20)))
 
@@ -421,7 +420,6 @@ class AudioLevelMeter:
             
             if peak_db > self.peak_level[channel]:
                 self.peak_level[channel] = peak_db
-                self.last_peak_time[channel] = time.currentTime
                 self.peak_hold_counter[channel] = int(self.PEAK_HOLD_TIME * 1000 / self.update_interval)
 
     def update_meter(self):
@@ -523,7 +521,6 @@ class AudioLevelMeter:
         #     sys.exit(0)
         # except:
         #     os._exit(0)
-
 
 if __name__ == "__main__":
     try:

@@ -27,7 +27,7 @@ class AudioLevelMeter:
         self.input_channels = devices[default_input]['max_input_channels']
 
         # Параметры окна (ширина зависит от количества каналов)
-        self.window_width = 60 if self.input_channels == 1 else 96
+        self.window_width = 60 if self.input_channels == 1 else 70
         self.window_height = 350
 
         # Калибровка уровней
@@ -72,7 +72,7 @@ class AudioLevelMeter:
 
     def setup_ui(self):
         title_font = tkfont.Font(family='Helvetica', size=12, weight='normal')
-        title = "Mic Level"
+        title = "VU" if self.input_channels == 1 else "VU Meter"
         self.title_label = tk.Label(
             self.root, 
             width=self.window_width,
@@ -88,7 +88,7 @@ class AudioLevelMeter:
         
         # Фрейм для индикаторов каналов
         self.indicators_frame = tk.Frame(self.meter_frame, bg='black')
-        self.indicators_frame.pack(side=tk.LEFT, padx=5)
+        self.indicators_frame.pack(side=tk.LEFT, padx=(7,3))
         
         self.canvases = []
         if self.input_channels == 1:

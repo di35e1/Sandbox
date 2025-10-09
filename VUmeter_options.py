@@ -30,8 +30,8 @@ class AudioLevelMeter:
 
         # Калибровка уровней
         self.LEVEL_RANGE = 60
-        self.PEAK_HOLD_TIME = 1
-        self.DECAY_RATE = 25
+        self.PEAK_HOLD_TIME = 1.5 # Seconds
+        self.DECAY_RATE = 25 # dB
         
         # Размер окна RMS по умолчанию (в миллисекундах)
         self.rms_window_size = 300  # 300ms по умолчанию
@@ -64,7 +64,7 @@ class AudioLevelMeter:
         self.setup_ui()
         self.setup_audio()
         
-        self.update_interval = 30
+        self.update_interval = 15
         self.root.after(self.update_interval, self.update_meter)
         self.root.mainloop()
 
@@ -100,7 +100,6 @@ class AudioLevelMeter:
         # Фрейм для индикаторов каналов
         self.indicators_frame = tk.Frame(self.meter_frame, bg='black')
         self.indicators_frame.pack(side=tk.LEFT, padx=(7,3))
-        
         self.canvases = []
         if self.input_channels == 1:
             channel_label = "M"
@@ -111,10 +110,9 @@ class AudioLevelMeter:
                 channel_label = "L" if i == 0 else "R"
                 canvas = self.create_indicator(self.indicators_frame, channel_label)
                 self.canvases.append(canvas)
-        
-        # Создаем шкалу
         self.scale_canvas = self.create_scale(self.meter_frame)
-
+ 
+        # Фрейм для кнопок
         self.buttons_frame = tk.Frame(self.root, bg='black')
         self.buttons_frame.pack(pady=5,side=tk.BOTTOM)
 
@@ -191,7 +189,7 @@ class AudioLevelMeter:
             width=1.5
         )
         
-        # RMS индикатор (черная черта) - создаем, но скрываем по умолчанию
+        # RMS индикатор (черта) - создаем, но скрываем по умолчанию
         canvas.rms_bar = canvas.create_line(
             0, 220, 10, 220, 
             fill='white', 
@@ -235,14 +233,14 @@ class AudioLevelMeter:
         self.scale_menu.add_checkbutton(
             label="RMS Mode", 
             variable=self.rms_mode_var,
-            command=lambda: self.set_display_mode("RMS")
+            command=lambda: [self.set_display_mode("RMS"), self.set_rms_window_size(300)]
         )
         self.scale_menu.add_checkbutton(
             label="PEAK Mode", 
             variable=self.peak_mode_var,
-            command=lambda: self.set_display_mode("PEAK")
+            command=lambda: [self.set_display_mode("PEAK"), self.set_rms_window_size(400)]
         )
-        
+
         # Добавляем разделитель
         self.scale_menu.add_separator()
         
@@ -251,46 +249,39 @@ class AudioLevelMeter:
         
         # Переменные для отслеживания выбранного размера окна
         self.rms_window_vars = {
-            25: tk.BooleanVar(value=False),
+            10: tk.BooleanVar(value=False),
             50: tk.BooleanVar(value=False),
-            100: tk.BooleanVar(value=False),
-            200: tk.BooleanVar(value=False),
-            300: tk.BooleanVar(value=True)  # По умолчанию 300ms
+            300: tk.BooleanVar(value=True),  # По умолчанию 300ms
+            400: tk.BooleanVar(value=False)
         }
         
         # Добавляем опции размера окна RMS
         self.rms_window_menu.add_checkbutton(
-            label="RMS Window: 25ms",
-            variable=self.rms_window_vars[25],
-            command=lambda: self.set_rms_window_size(25)
+            label="10ms",
+            variable=self.rms_window_vars[10],
+            command=lambda: self.set_rms_window_size(10)
         )       
         self.rms_window_menu.add_checkbutton(
-            label="RMS Window: 50ms",
+            label="50ms",
             variable=self.rms_window_vars[50],
             command=lambda: self.set_rms_window_size(50)
         )
         self.rms_window_menu.add_checkbutton(
-            label="RMS Window: 100ms", 
-            variable=self.rms_window_vars[100],
-            command=lambda: self.set_rms_window_size(100)
-        )
-        self.rms_window_menu.add_checkbutton(
-            label="RMS Window: 200ms",
-            variable=self.rms_window_vars[200],
-            command=lambda: self.set_rms_window_size(200)
-        )
-        self.rms_window_menu.add_checkbutton(
-            label="RMS Window: 300ms",
+            label="300ms",
             variable=self.rms_window_vars[300],
             command=lambda: self.set_rms_window_size(300)
         )
-        
+        self.rms_window_menu.add_checkbutton(
+            label="400ms",
+            variable=self.rms_window_vars[400],
+            command=lambda: self.set_rms_window_size(400)
+        ) 
+
         # Добавляем подменю в основное меню
-        self.scale_menu.add_cascade(label="RMS Window Size", menu=self.rms_window_menu)
+        self.scale_menu.add_cascade(label="Integration Time", menu=self.rms_window_menu)
         
         # Привязываем правую кнопку мыши (Button-2) к показу меню
         canvas.bind("<Button-2>", self.show_scale_menu)
-        scale_frame.bind("<Button-2>", self.show_scale_menu)
 
         db_scale = [-1, -6, -12, -18, -24, -30, -35, -40, -45, -50, -55, -60]
         for db in db_scale:
@@ -583,7 +574,6 @@ class AudioLevelMeter:
             # Пик рассчитывается только из текущего блока (как раньше)
             peak = np.max(np.abs(indata[:, channel]))
             peak_capped = min(peak, 1.0)  # ограничивает индикатор на 0 dB (1.0)
-
             peak_db = 20 * np.log10(max(peak_capped, 1e-6))
             
             # Обновляем пиковый уровень с задержкой (для красной черты)
@@ -593,27 +583,12 @@ class AudioLevelMeter:
 
             # Для режима PEAK - обновляем отображаемые уровни
             if self.display_mode == "PEAK":
-                # Столбик - пиковые значения с плавным затуханием (в 2 раза быстрее)
                 if peak_db > self.peak_display_level[channel]:
                     self.peak_display_level[channel] = peak_db
-                else:
-                    # Плавное затухание для peak_display_level (в 2 раза быстрее чем RMS)
-                    decay_amount = self.DECAY_RATE * 2 * (self.update_interval/1000)
-                    self.peak_display_level[channel] = max(
-                        self.peak_display_level[channel] - decay_amount, 
-                        -self.LEVEL_RANGE
-                    )
                 
-                # Черная черта RMS - плавное обновление с DECAY_RATE = 25
+                # Черта RMS - плавное обновление
                 if self.rms_level[channel] > self.rms_display_level[channel]:
                     self.rms_display_level[channel] = self.rms_level[channel]
-                else:
-                    # Плавное затухание для RMS черты с DECAY_RATE = 25
-                    decay_amount = self.DECAY_RATE * (self.update_interval/1000)
-                    self.rms_display_level[channel] = max(
-                        self.rms_display_level[channel] - decay_amount, 
-                        -self.LEVEL_RANGE
-                    )
 
     def update_meter(self):
         level_exceeded_title = any(level > -3 for level in self.peak_level)
@@ -643,32 +618,41 @@ class AudioLevelMeter:
                 
                 # Используем smoothed_level для отображения столбика
                 display_level = self.smoothed_level[channel]
-            else:
-                # Режим PEAK - используем peak_display_level для отображения столбика (плавный, но быстрый)
+
+            else: 
+                #PEAK
+                if self.peak_display_level[channel] > -self.LEVEL_RANGE:
+                    distance = (self.peak_display_level[channel] + self.LEVEL_RANGE) / self.LEVEL_RANGE
+                    alpha = 0.005 + 0.045 * distance  # 0.5-5% в зависимости от позиции
+                    self.peak_display_level[channel] = (1 - alpha) * self.peak_display_level[channel] + alpha * (-self.LEVEL_RANGE)
+                    if self.peak_display_level[channel] < (-self.LEVEL_RANGE + 0.1):
+                        self.peak_display_level[channel] = -self.LEVEL_RANGE
+
+                # Экспоненциальное сглаживание RMS
+                if self.rms_level[channel] > self.smoothed_level[channel]:
+                    # Быстрая атака (0.3 = 30% шага)
+                    alpha = 0.3
+                else:
+                    # Медленный спад (0.05 = 5% шага)  
+                    alpha = 0.05
+
+                self.smoothed_level[channel] = (1 - alpha) * self.smoothed_level[channel] + alpha * self.rms_level[channel]
                 display_level = self.peak_display_level[channel]
-            
+
             # Обновляем пиковую черту (как раньше)
             if self.peak_hold_counter[channel] > 0:
                 self.peak_hold_counter[channel] -= 1
             else:
-                decay_amount = self.DECAY_RATE * 2 * (self.update_interval/1000)
-                self.peak_level[channel] = max(
-                    self.peak_level[channel] - decay_amount, 
-                    -self.LEVEL_RANGE
-                )
-            
-            def db_to_pos(db):
-                return 220 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
+                # Экспоненциальное сглаживание пика
+                alpha = 0.1
+                self.peak_level[channel] = (1 - alpha) * self.peak_level[channel] + alpha * (-self.LEVEL_RANGE)
             
             # Позиции для отображения
+            def db_to_pos(db):
+                return 220 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
             display_pos = db_to_pos(display_level)
             peak_pos = db_to_pos(self.peak_level[channel])
-            
-            # В режиме PEAK используем плавный RMS для черной черты
-            if self.display_mode == "PEAK":
-                rms_pos = db_to_pos(self.rms_display_level[channel])
-            else:
-                rms_pos = db_to_pos(self.rms_level[channel])
+            rms_pos = db_to_pos(self.smoothed_level[channel])
             
             # Обновляем основной столбик
             canvas.coords(canvas.level_bar, 0, display_pos, 10, 220)

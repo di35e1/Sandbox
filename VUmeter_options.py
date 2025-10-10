@@ -97,9 +97,11 @@ class AudioLevelMeter:
         self.meter_frame = tk.Frame(self.root, bg='black')
         self.meter_frame.pack()
         
+        
         # Фрейм для индикаторов каналов
         self.indicators_frame = tk.Frame(self.meter_frame, bg='black')
         self.indicators_frame.pack(side=tk.LEFT, padx=(7,3))
+
         self.canvases = []
         if self.input_channels == 1:
             channel_label = "M"
@@ -173,7 +175,7 @@ class AudioLevelMeter:
         canvas.pack(pady=0)
 
         canvas.channel_label = channel_label
-        
+
         # Основной индикатор (столбик)
         canvas.level_bar = canvas.create_rectangle(
             0, 220, 10, 220,
@@ -231,12 +233,12 @@ class AudioLevelMeter:
         
         # Добавляем команды с галочками
         self.scale_menu.add_checkbutton(
-            label="RMS Mode", 
+            label="RMS + PEAK", 
             variable=self.rms_mode_var,
             command=lambda: [self.set_display_mode("RMS"), self.set_rms_window_size(300)]
         )
         self.scale_menu.add_checkbutton(
-            label="PEAK Mode", 
+            label="PEAKs + RMS", 
             variable=self.peak_mode_var,
             command=lambda: [self.set_display_mode("PEAK"), self.set_rms_window_size(400)]
         )
@@ -623,18 +625,20 @@ class AudioLevelMeter:
                 #PEAK
                 if self.peak_display_level[channel] > -self.LEVEL_RANGE:
                     distance = (self.peak_display_level[channel] + self.LEVEL_RANGE) / self.LEVEL_RANGE
-                    alpha = 0.005 + 0.045 * distance  # 0.5-5% в зависимости от позиции
+                    alpha = 0.005 + 0.01 * distance  # 0.5-1% в зависимости от позиции
                     self.peak_display_level[channel] = (1 - alpha) * self.peak_display_level[channel] + alpha * (-self.LEVEL_RANGE)
                     if self.peak_display_level[channel] < (-self.LEVEL_RANGE + 0.1):
                         self.peak_display_level[channel] = -self.LEVEL_RANGE
 
                 # Экспоненциальное сглаживание RMS
                 if self.rms_level[channel] > self.smoothed_level[channel]:
-                    # Быстрая атака (0.3 = 30% шага)
-                    alpha = 0.3
+                    # Атака 
+                    alpha = 0.5
                 else:
-                    # Медленный спад (0.05 = 5% шага)  
-                    alpha = 0.05
+                    # Спад
+                    #alpha = 0.1
+                    distance = (self.rms_level[channel] + self.LEVEL_RANGE) / self.LEVEL_RANGE
+                    alpha = 0.1 + 0.3 * distance  # 10-30% в зависимости от позиции
 
                 self.smoothed_level[channel] = (1 - alpha) * self.smoothed_level[channel] + alpha * self.rms_level[channel]
                 display_level = self.peak_display_level[channel]

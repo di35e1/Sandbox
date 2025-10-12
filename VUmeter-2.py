@@ -30,11 +30,11 @@ class AudioLevelMeter:
 
         # Калибровка уровней
         self.LEVEL_RANGE = 60
-        self.PEAK_HOLD_TIME = 1.5 # Seconds
+        self.PEAK_HOLD_TIME = 1 # Seconds
         self.DECAY_RATE = 25 # dB
         
         # Размер окна RMS по умолчанию (в миллисекундах)
-        self.rms_window_size = 300  # 300ms по умолчанию
+        self.rms_window_size = 50  # 300ms по умолчанию
         
         # Состояние уровней
         self.peak_level = [-self.LEVEL_RANGE] * self.input_channels
@@ -235,12 +235,12 @@ class AudioLevelMeter:
         self.scale_menu.add_checkbutton(
             label="RMS + PEAK", 
             variable=self.rms_mode_var,
-            command=lambda: [self.set_display_mode("RMS"), self.set_rms_window_size(300)]
+            command=lambda: self.set_display_mode("RMS")
         )
         self.scale_menu.add_checkbutton(
             label="PEAKs + RMS", 
             variable=self.peak_mode_var,
-            command=lambda: [self.set_display_mode("PEAK"), self.set_rms_window_size(400)]
+            command=lambda: self.set_display_mode("PEAK")
         )
 
         # Добавляем разделитель
@@ -650,6 +650,10 @@ class AudioLevelMeter:
                 # Экспоненциальное сглаживание пика
                 alpha = 0.1
                 self.peak_level[channel] = (1 - alpha) * self.peak_level[channel] + alpha * (-self.LEVEL_RANGE)
+            
+            if self.peak_level[channel] < display_level:
+                self.peak_level[channel] = display_level                
+
             
             # Позиции для отображения
             def db_to_pos(db):

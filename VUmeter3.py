@@ -34,6 +34,10 @@ class MeterCanvas(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), Qt.GlobalColor.black)
 
+        # Защита от отрисовки до инициализации аудио
+        if not hasattr(self.main, 'input_channels') or not hasattr(self.main, 'rms_level'):
+            return
+
         LEVEL_RANGE = self.main.LEVEL_RANGE
         bar_bottom = 215 
         bar_top = 10
@@ -46,6 +50,7 @@ class MeterCanvas(QWidget):
 
         # 1. Отрисовка каналов (Слева)
         for ch in range(self.main.input_channels):
+            if ch >= len(self.main.peak_level): break
             ch_x = 10 + ch * 20
             label = "M" if self.main.input_channels == 1 else ("L" if ch == 0 else "R")
             
@@ -130,11 +135,21 @@ class AudioLevelMeter(QWidget):
         self.setWindowOpacity(0.75)
         self.setStyleSheet("background-color: black; color: white;")
 
+        # --- БАЗОВАЯ ИНИЦИАЛИЗАЦИЯ (Защита от AttributeError) ---
         self.LEVEL_RANGE = 60
         self.PEAK_HOLD_TIME = 1.5
         self.DECAY_RATE = 25
         self.rms_window_size = 50
         self.display_mode = "RMS"
+        self.input_channels = 1
+        self.sample_rate = 44100
+        
+        self.rms_level = [-self.LEVEL_RANGE]
+        self.peak_level = [-self.LEVEL_RANGE]
+        self.smoothed_level = [-self.LEVEL_RANGE]
+        self.peak_hold_counter = [0]
+        self.peak_display_level = [-self.LEVEL_RANGE]
+        self.rms_display_level = [-self.LEVEL_RANGE]
 
         self.show_spectrum = False
         self.NUM_BANDS = 31
@@ -144,13 +159,17 @@ class AudioLevelMeter(QWidget):
         self.available_max_freqs = [10000, 16000, 20000]
         self.band_centers = np.logspace(np.log10(self.MIN_FREQ), np.log10(self.MAX_FREQ), self.NUM_BANDS)
         
+        self.band_levels = np.full(self.NUM_BANDS, -self.LEVEL_RANGE, dtype=np.float32)
+        self.smoothed_band_levels = np.full(self.NUM_BANDS, -self.LEVEL_RANGE, dtype=np.float32)
+        self.peak_band_levels = np.full(self.NUM_BANDS, -self.LEVEL_RANGE, dtype=np.float32)
+        self.peak_band_hold = np.zeros(self.NUM_BANDS)
+
         self.recording = False
         self.audio_file = None
         self.recording_start_time = 0
 
         self.setup_ui()
         
-        # Индекс текущего устройства (сначала None, установится в setup_audio)
         self.current_device_index = None
         self.setup_audio()
         self.apply_window_size()
@@ -184,17 +203,43 @@ class AudioLevelMeter(QWidget):
         main_layout.addWidget(self.btn_close)
 
     def apply_window_size(self):
-        if not hasattr(self, 'input_channels'): return
-        
-        base_width = 60 if self.input_channels == 1 else 85
-        if self.show_spectrum:
-            self.meter_canvas.setFixedSize(base_width + 410, 240)
-            self.setFixedSize(base_width + 450, 360)
-            self.title_label.setText("VU Meter + Spectrum")
-        else:
-            self.meter_canvas.setFixedSize(base_width, 240)
-            self.setFixedSize(base_width + 10, 360)
-            self.title_label.setText("VU Meter")
+            if not hasattr(self, 'input_channels'): return
+            
+            base_width = 60 if self.input_channels == 1 else 85
+            
+            # Определяем целевую ширину и высоту
+            if self.show_spectrum:
+                target_width = base_width + 450
+                target_height = 360
+                self.meter_canvas.setFixedSize(base_width + 420, 240)
+                self.title_label.setText("VU Meter + Spectrum")
+            else:
+                target_width = base_width + 10
+                target_height = 360
+                self.meter_canvas.setFixedSize(base_width, 240)
+                self.title_label.setText("VU Meter")
+
+            # --- ЛОГИКА СДВИГА (Защита от выхода за экран) ---
+            
+            # 1. Получаем текущую геометрию окна и экрана
+            current_geo = self.geometry()
+            screen_geo = self.screen().availableGeometry()
+            
+            new_x = current_geo.x()
+            new_y = current_geo.y()
+
+            # 2. Проверяем, не вылезет ли правый край за границы экрана
+            if new_x + target_width > screen_geo.right():
+                # Сдвигаем окно влево ровно настолько, чтобы оно поместилось
+                new_x = screen_geo.right() - target_width - 10 # -10 для небольшого отступа от края
+                
+            # 3. На всякий случай проверяем и левый край (если экран очень маленький)
+            if new_x < screen_geo.left():
+                new_x = screen_geo.left() + 5
+
+            # Применяем новые координаты и размер
+            self.setGeometry(new_x, new_y, target_width, target_height)
+            self.setFixedSize(target_width, target_height)
 
     def create_button(self, text, callback):
         btn = QPushButton(text)
@@ -216,52 +261,48 @@ class AudioLevelMeter(QWidget):
             event.accept()
 
     def get_input_devices(self):
-            """Опрашивает устройства. Сбрасывает кэш и переподключает аудио ТОЛЬКО если нет записи."""
-            
-            # Если запись НЕ ИДЕТ, мы делаем полную проверку и сброс
-            if not self.recording:            
-                # 1. Закрываем текущий стрим
+        """Безопасный опрос устройств с полным сбросом PortAudio"""
+        if self.recording:
+            return [(self.current_device_index, "Recording in progress...")]
+
+        try:
+            # 1. Жесткий сброс для очистки 'битых' индексов хаба
+            if hasattr(self, 'audio_stream') and self.audio_stream:
                 try:
-                    if hasattr(self, 'audio_stream') and self.audio_stream:
-                        self.audio_stream.stop()
-                        self.audio_stream.close()
-                except:
-                    pass
+                    self.audio_stream.stop()
+                    self.audio_stream.close()
+                except: pass
+                self.audio_stream = None
 
-                # 2. Сбрасываем кэш PortAudio (чтобы увидеть новые USB)
-                try:
-                    sd._terminate()
-                    sd._initialize()
-                except:
-                    pass
+            sd._terminate()
+            sd._initialize()
 
-                # 3. Возвращаем стрим к жизни (переоткрываем его)
-                self.setup_audio()
-            
-            # --- СЛЕДУЮЩИЕ ШАГИ ВЫПОЛНЯЮТСЯ ВСЕГДА (БЕЗОПАСНО) ---
-
-            # 4. Собираем список микрофонов (sd.query_devices без сброса кэша не портит поток)
+            # 2. Получаем новый список
             devices = sd.query_devices()
             inputs = []
             for i, dev in enumerate(devices):
-                if dev['max_input_channels'] > 0:
+                if dev.get('max_input_channels', 0) > 0:
                     inputs.append((i, dev['name']))
             
-            # 5. Проверка индекса (только если мы не в режиме записи, чтобы не дергать девайс)
-            if not self.recording:
-                try:
+            # 3. Проверка текущего устройства
+            try:
+                if self.current_device_index is not None:
                     sd.query_devices(self.current_device_index)
-                except:
-                    self.current_device_index = sd.default.device[0]
-                    self.setup_audio() # Еще раз переподключим, если индекс сменился
-                
+            except:
+                self.current_device_index = sd.default.device[0]
+
+            self.setup_audio()
             return inputs
 
+        except Exception as e:
+            print(f"Device update error: {e}")
+            return [(0, "Error updating devices")]
+
     def show_settings_menu(self):
+        
         menu = QMenu(self)
         menu.setStyleSheet("QMenu { background-color: #222; color: white; border: 1px solid #555; } QMenu::item:selected { background-color: #444; }")
         
-        # 1. Меню выбора микрофона
         device_menu = menu.addMenu("Input Device")
         for idx, name in self.get_input_devices():
             act = QAction(name, self, checkable=True)
@@ -270,7 +311,6 @@ class AudioLevelMeter(QWidget):
             device_menu.addAction(act)
         menu.addSeparator()
 
-        # Системные настройки (как запасной вариант)
         act_sys = QAction("System Sound Settings", self)
         act_sys.triggered.connect(self.open_sound_settings)
         menu.addAction(act_sys)
@@ -319,10 +359,8 @@ class AudioLevelMeter(QWidget):
         menu.exec(self.mapToGlobal(self.btn_settings.rect().bottomLeft()))
 
     def change_device(self, index):
-        """Переключает программу на выбранный пользователем микрофон"""
         if index == self.current_device_index:
             return
-        print(f"Switching device to index: {index}")
         self.current_device_index = index
         self.reconnect_audio()
 
@@ -331,9 +369,7 @@ class AudioLevelMeter(QWidget):
             self.MIN_FREQ = freq
         else:
             self.MAX_FREQ = freq
-            
         self.band_centers = np.logspace(np.log10(self.MIN_FREQ), np.log10(self.MAX_FREQ), self.NUM_BANDS)
-        
         self.filters = self.create_filters()
         self.filter_states = []
         for sos in self.filters:
@@ -341,7 +377,6 @@ class AudioLevelMeter(QWidget):
                 self.filter_states.append(np.zeros((sos.shape[0], 2)))
             else:
                 self.filter_states.append(None)
-                
         self.band_levels.fill(-self.LEVEL_RANGE)
         self.smoothed_band_levels.fill(-self.LEVEL_RANGE)
         self.peak_band_levels.fill(-self.LEVEL_RANGE)
@@ -371,17 +406,14 @@ class AudioLevelMeter(QWidget):
         for i, center_freq in enumerate(self.band_centers):
             low = center_freq / (2**(1/6))
             high = center_freq * (2**(1/6))
-            
             if i == self.NUM_BANDS - 1 and self.MAX_FREQ >= 16000:
                 high = min(self.MAX_FREQ, nyquist - 1)
-
             try:
                 order = 2 if center_freq < 200 else 4
                 sos = signal.butter(order, [low, high], btype='bandpass', fs=self.sample_rate, output='sos')
                 filters.append(sos)
             except:
                 filters.append(None)
-                
         return filters
 
     def toggle_record(self):
@@ -421,80 +453,68 @@ class AudioLevelMeter(QWidget):
             mins, secs = divmod(elapsed, 60)
             self.btn_record.setText(f"{mins:02d}:{secs:02d}")
 
-    # ==========================================
-    # ЛОГИКА АУДИО (ПЕРЕКЛЮЧЕНИЕ УСТРОЙСТВ)
-    # ==========================================
     def reconnect_audio(self):
-            if self.recording:
-                self.toggle_record() # Это остановит и сохранит файл перед сменой микрофона
-
-            """Мягкая перезагрузка: закрываем старое, обновляем параметры и запускаем новое"""
-            try:
-                # 1. Закрываем старый стрим, если он есть
-                if hasattr(self, 'audio_stream') and self.audio_stream:
-                    self.audio_stream.stop()
-                    self.audio_stream.close()
-                
-                # 2. Обновляем параметры именно для того устройства, которое выбрано сейчас
-                device_info = sd.query_devices(self.current_device_index)
-                self.input_channels = device_info['max_input_channels']
-                self.sample_rate = int(device_info['default_samplerate'])
-                
-                # 3. Запускаем звук и обновляем интерфейс
-                self.setup_audio()
-                self.apply_window_size()
-                
-                print(f"Successfully switched to: {device_info['name']} ({self.input_channels} ch)")
-                
-            except Exception as e:
-                print(f"Reconnect failed: {e}")
+        if self.recording: self.toggle_record()
+        try:
+            if hasattr(self, 'audio_stream') and self.audio_stream:
+                self.audio_stream.stop()
+                self.audio_stream.close()
+            self.setup_audio()
+            self.apply_window_size()
+        except Exception as e:
+            print(f"Reconnect failed: {e}")
 
     def setup_audio(self):
-        """Настраивает аудио стрим для выбранного устройства"""
-        if self.current_device_index is None:
-            self.current_device_index = sd.default.device[0]
+        """Безопасная настройка потока с проверкой каналов"""
+        try:
+            if self.current_device_index is None:
+                self.current_device_index = sd.default.device[0]
+
+            device_info = sd.query_devices(self.current_device_index, 'input')
+            max_ch = device_info.get('max_input_channels', 0)
             
-        device_info = sd.query_devices(self.current_device_index)
-        
-        self.input_channels = device_info['max_input_channels']
-        self.sample_rate = int(device_info['default_samplerate'])
+            if max_ch == 0:
+                print("Device has 0 channels. Waiting...")
+                return
 
-        self.peak_level = [-self.LEVEL_RANGE] * self.input_channels
-        self.rms_level = [-self.LEVEL_RANGE] * self.input_channels
-        self.smoothed_level = [-self.LEVEL_RANGE] * self.input_channels
-        self.peak_hold_counter = [0] * self.input_channels
-        
-        self.peak_display_level = [-self.LEVEL_RANGE] * self.input_channels
-        self.rms_display_level = [-self.LEVEL_RANGE] * self.input_channels
-        
-        self.band_levels = np.full(self.NUM_BANDS, -self.LEVEL_RANGE, dtype=np.float32)
-        self.smoothed_band_levels = np.full(self.NUM_BANDS, -self.LEVEL_RANGE, dtype=np.float32)
-        self.peak_band_levels = np.full(self.NUM_BANDS, -self.LEVEL_RANGE, dtype=np.float32)
-        self.peak_band_hold = np.zeros(self.NUM_BANDS)
+            self.input_channels = max_ch
+            self.sample_rate = int(device_info.get('default_samplerate', 44100))
 
-        self.update_rms_buffer()
-        
-        self.filters = self.create_filters()
-        
-        self.filter_states = []
-        for sos in self.filters:
-            if sos is not None:
-                self.filter_states.append(np.zeros((sos.shape[0], 2)))
-            else:
-                self.filter_states.append(None)
-        
-        # Запускаем стрим ПРИНУДИТЕЛЬНО на выбранном устройстве
-        self.audio_stream = sd.InputStream(
-            device=self.current_device_index,
-            samplerate=self.sample_rate,
-            channels=self.input_channels,
-            blocksize=2048,
-            callback=self.audio_callback,
-        )
-        self.audio_stream.start()
+            # Пересоздаем массивы под актуальное кол-во каналов
+            self.peak_level = [-self.LEVEL_RANGE] * self.input_channels
+            self.rms_level = [-self.LEVEL_RANGE] * self.input_channels
+            self.smoothed_level = [-self.LEVEL_RANGE] * self.input_channels
+            self.peak_hold_counter = [0] * self.input_channels
+            self.peak_display_level = [-self.LEVEL_RANGE] * self.input_channels
+            self.rms_display_level = [-self.LEVEL_RANGE] * self.input_channels
+            
+            self.update_rms_buffer()
+            self.filters = self.create_filters()
+            self.filter_states = []
+            for sos in self.filters:
+                if sos is not None:
+                    self.filter_states.append(np.zeros((sos.shape[0], 2)))
+                else:
+                    self.filter_states.append(None)
+            
+            self.audio_stream = sd.InputStream(
+                device=self.current_device_index,
+                samplerate=self.sample_rate,
+                channels=self.input_channels,
+                blocksize=2048,
+                callback=self.audio_callback,
+            )
+            self.audio_stream.start()
+        except Exception as e:
+            print(f"Setup failed: {e}")
+            self.change_device(None)
 
     def audio_callback(self, indata, frames, time, status):
         try:
+            # Защита: количество каналов в данных должно совпадать с массивом уровней
+            if indata.shape[1] != len(self.rms_level):
+                return
+
             if self.recording and self.audio_file:
                 audio_data_int16 = (indata * 32767).astype(np.int16)
                 self.audio_file.writeframes(audio_data_int16.tobytes())
@@ -530,34 +550,32 @@ class AudioLevelMeter(QWidget):
 
             if self.show_spectrum:
                 mono_signal = np.mean(indata, axis=1) if indata.shape[1] >= 2 else indata[:, 0]
-                
                 for i in range(self.NUM_BANDS):
                     sos = self.filters[i]
                     if sos is not None:
                         try:
-                            filtered, self.filter_states[i] = signal.sosfilt(
-                                sos, 
-                                mono_signal, 
-                                zi=self.filter_states[i]
-                            )
-                            
+                            filtered, self.filter_states[i] = signal.sosfilt(sos, mono_signal, zi=self.filter_states[i])
                             rms = np.sqrt(np.mean(filtered**2))
                             db_level = 20 * np.log10(max(rms, 1e-6))
                             self.band_levels[i] = max(min(db_level, 0), -self.LEVEL_RANGE)
-                            
                             if db_level > self.peak_band_levels[i]:
                                 self.peak_band_levels[i] = db_level
                                 self.peak_band_hold[i] = int(self.PEAK_HOLD_TIME * 1000 / self.update_interval)
                         except:
                             self.band_levels[i] = -self.LEVEL_RANGE
-        except Exception as e:
+        except:
             pass
 
     def update_meter(self):
+        # Защита: если данные еще не готовы или идет переинициализация
+        if not hasattr(self, 'rms_level') or len(self.rms_level) != self.input_channels:
+            return
+
         level_exceeded = any(level > -3 for level in self.peak_level)
         self.title_label.setStyleSheet("color: red;" if level_exceeded else "color: lightgray;")
 
         for channel in range(self.input_channels):
+            if channel >= len(self.rms_level): break
             if self.display_mode == "RMS":
                 if self.rms_level[channel] > self.smoothed_level[channel]:
                     self.smoothed_level[channel] = self.rms_level[channel]
@@ -569,9 +587,6 @@ class AudioLevelMeter(QWidget):
                     distance = (self.peak_display_level[channel] + self.LEVEL_RANGE) / self.LEVEL_RANGE
                     alpha = 0.005 + 0.01 * distance 
                     self.peak_display_level[channel] = (1 - alpha) * self.peak_display_level[channel] + alpha * (-self.LEVEL_RANGE)
-                    if self.peak_display_level[channel] < (-self.LEVEL_RANGE + 0.1):
-                        self.peak_display_level[channel] = -self.LEVEL_RANGE
-
                 if self.rms_level[channel] > self.smoothed_level[channel]:
                     alpha = 0.5
                 else:
@@ -591,7 +606,6 @@ class AudioLevelMeter(QWidget):
                 else:
                     decay_amount = self.DECAY_RATE * (self.update_interval/1000)
                     self.smoothed_band_levels[i] = max(self.smoothed_band_levels[i] - decay_amount, -self.LEVEL_RANGE)
-
                 if self.peak_band_hold[i] > 0:
                     self.peak_band_hold[i] -= 1
                 else:
@@ -604,25 +618,19 @@ class AudioLevelMeter(QWidget):
         subprocess.run(["open", "x-apple.systempreferences:com.apple.Sound-Settings.extension"])
 
     def close_program(self):
-        if self.recording:
-            self.toggle_record()
-        
+        if self.recording: self.toggle_record()
         try:
             if hasattr(self, 'audio_stream') and self.audio_stream:
                 self.audio_stream.stop()
                 self.audio_stream.close()
-        except:
-            pass
-            
+        except: pass
         self.timer.stop()
         self.close()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     meter = AudioLevelMeter()
-    
     screen = app.primaryScreen().geometry()
     meter.move(screen.width() - 200, screen.height() - 400)
-    
     meter.show()
     sys.exit(app.exec())

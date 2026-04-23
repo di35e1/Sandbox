@@ -15,14 +15,15 @@ import os
 import wave
 import datetime
 import subprocess
+import time
 import numpy as np
 import sounddevice as sd
 from scipy import signal
 
-from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, 
+from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QPushButton, QMenu)
 from PyQt6.QtCore import Qt, QTimer, QRectF
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QAction, QCursor
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QAction, QShortcut, QKeySequence
 
 class MeterCanvas(QWidget):
     """Кастомный виджет, который рисует шкалы, индикаторы и спектр"""
@@ -143,6 +144,7 @@ class AudioLevelMeter(QWidget):
         self.display_mode = "RMS"
         self.input_channels = 1
         self.sample_rate = 44100
+        self.last_callback_time = time.time()
         
         self.rms_level = [-self.LEVEL_RANGE]
         self.peak_level = [-self.LEVEL_RANGE]
@@ -170,6 +172,18 @@ class AudioLevelMeter(QWidget):
 
         self.setup_ui()
         
+        # --- ГОРЯЧИЕ КЛАВИШИ ---
+        self.shortcut_rec = QShortcut(QKeySequence("Ctrl+R"), self)
+        self.shortcut_rec.activated.connect(self.toggle_record)
+        
+        # Плюс на основной клавиатуре (находится на кнопке "=")
+        self.shortcut_spec_main = QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_Equal), self)
+        self.shortcut_spec_main.activated.connect(lambda: self.toggle_spectrum(not self.show_spectrum))
+        
+        # Плюс на цифровом блоке Numpad
+        self.shortcut_spec_num = QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_Plus), self)
+        self.shortcut_spec_num.activated.connect(lambda: self.toggle_spectrum(not self.show_spectrum))
+        
         self.current_device_index = None
         self.setup_audio()
         self.apply_window_size()
@@ -194,52 +208,70 @@ class AudioLevelMeter(QWidget):
         self.meter_canvas = MeterCanvas(self)
         main_layout.addWidget(self.meter_canvas, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        # Контейнер для кнопок, чтобы менять их расположение на лету
+        self.buttons_container = QWidget()
+        main_layout.addWidget(self.buttons_container)
+
         self.btn_record = self.create_button("Rec", self.toggle_record)
         self.btn_settings = self.create_button("Settings", self.show_settings_menu)
         self.btn_close = self.create_button("Close", self.close_program)
 
-        main_layout.addWidget(self.btn_record)
-        main_layout.addWidget(self.btn_settings)
-        main_layout.addWidget(self.btn_close)
-
     def apply_window_size(self):
-            if not hasattr(self, 'input_channels'): return
-            
-            base_width = 60 if self.input_channels == 1 else 85
-            
-            # Определяем целевую ширину и высоту
-            if self.show_spectrum:
-                target_width = base_width + 450
-                target_height = 360
-                self.meter_canvas.setFixedSize(base_width + 420, 240)
-                self.title_label.setText("VU Meter + Spectrum")
-            else:
-                target_width = base_width + 10
-                target_height = 360
-                self.meter_canvas.setFixedSize(base_width, 240)
-                self.title_label.setText("VU Meter")
+        if not hasattr(self, 'input_channels'): return
+        
+        base_width = 60 if self.input_channels == 1 else 85
+        
+        # --- БЕЗОПАСНАЯ ОЧИСТКА СТАРОГО LAYOUT ---
+        old_layout = self.buttons_container.layout()
+        if old_layout is not None:
+            # Сначала отвязываем кнопки от старого layout, чтобы не удалить их
+            while old_layout.count():
+                item = old_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.setParent(None)
+            # Удаляем сам объект старого layout
+            QWidget().setLayout(old_layout)
+        
+        # --- НАСТРОЙКА НОВОГО LAYOUT И РАЗМЕРОВ ---
+        if self.show_spectrum:
+            target_width = base_width + 450
+            target_height = 290 # Уменьшенная высота окна
+            self.meter_canvas.setFixedSize(base_width + 420, 240)
+            self.title_label.setText("VU Meter + Spectrum")
+            new_layout = QHBoxLayout(self.buttons_container) # Горизонтальный ряд
+        else:
+            target_width = base_width + 10
+            target_height = 340 # Обычная высота окна
+            self.meter_canvas.setFixedSize(base_width, 240)
+            self.title_label.setText("VU Meter")
+            new_layout = QVBoxLayout(self.buttons_container) # Вертикальный столбик
 
-            # --- ЛОГИКА СДВИГА (Защита от выхода за экран) ---
-            
-            # 1. Получаем текущую геометрию окна и экрана
-            current_geo = self.geometry()
-            screen_geo = self.screen().availableGeometry()
-            
-            new_x = current_geo.x()
-            new_y = current_geo.y()
+        new_layout.setContentsMargins(0, 0, 0, 0)
+        new_layout.setSpacing(5)
+        new_layout.addWidget(self.btn_record)
+        new_layout.addWidget(self.btn_settings)
+        new_layout.addWidget(self.btn_close)
 
-            # 2. Проверяем, не вылезет ли правый край за границы экрана
-            if new_x + target_width > screen_geo.right():
-                # Сдвигаем окно влево ровно настолько, чтобы оно поместилось
-                new_x = screen_geo.right() - target_width - 10 # -10 для небольшого отступа от края
-                
-            # 3. На всякий случай проверяем и левый край (если экран очень маленький)
-            if new_x < screen_geo.left():
-                new_x = screen_geo.left() + 5
+        # --- ЛОГИКА СДВИГА (Защита от выхода за экран) ---
+        current_geo = self.geometry()
+        screen_geo = self.screen().availableGeometry()
+        
+        new_x = current_geo.x()
+        new_y = current_geo.y()
 
-            # Применяем новые координаты и размер
-            self.setGeometry(new_x, new_y, target_width, target_height)
-            self.setFixedSize(target_width, target_height)
+        if new_x + target_width > screen_geo.right():
+            new_x = screen_geo.right() - target_width - 10
+            
+        if new_x < screen_geo.left():
+            new_x = screen_geo.left() + 5
+
+        # Защита по Y оси (поскольку мы меняем высоту, окно может уползти вниз)
+        if new_y + target_height > screen_geo.bottom():
+            new_y = screen_geo.bottom() - target_height - 10
+
+        self.setGeometry(new_x, new_y, target_width, target_height)
+        self.setFixedSize(target_width, target_height)
 
     def create_button(self, text, callback):
         btn = QPushButton(text)
@@ -454,15 +486,35 @@ class AudioLevelMeter(QWidget):
             self.btn_record.setText(f"{mins:02d}:{secs:02d}")
 
     def reconnect_audio(self):
-        if self.recording: self.toggle_record()
-        try:
-            if hasattr(self, 'audio_stream') and self.audio_stream:
-                self.audio_stream.stop()
-                self.audio_stream.close()
-            self.setup_audio()
-            self.apply_window_size()
-        except Exception as e:
-            print(f"Reconnect failed: {e}")
+            # Запоминаем, шла ли запись до обрыва
+            was_recording = self.recording
+            
+            if was_recording:
+                print("Обрыв потока: сохраняем текущий файл записи...")
+                self.toggle_record() # Эта команда безопасно закроет текущий файл
+            
+            try:
+                # Умная проверка: живо ли еще устройство
+                if self.current_device_index is not None:
+                    sd.query_devices(self.current_device_index, 'input')
+            except Exception:
+                print("Текущее устройство недоступно, переключаемся на системный микрофон...")
+                self.current_device_index = None # Сброс на дефолт
+                
+            try:
+                if hasattr(self, 'audio_stream') and self.audio_stream:
+                    self.audio_stream.stop()
+                    self.audio_stream.close()
+                self.setup_audio()
+                self.apply_window_size()
+                
+                # Если до обрыва шла запись, автоматически начинаем новый файл!
+                if was_recording:
+                    print("Связь восстановлена: начинаем запись в новый файл...")
+                    self.toggle_record() # Эта команда создаст новый файл и запустит таймер заново
+                    
+            except Exception as e:
+                print(f"Reconnect failed: {e}")
 
     def setup_audio(self):
         """Безопасная настройка потока с проверкой каналов"""
@@ -509,7 +561,8 @@ class AudioLevelMeter(QWidget):
             print(f"Setup failed: {e}")
             self.change_device(None)
 
-    def audio_callback(self, indata, frames, time, status):
+    def audio_callback(self, indata, frames, time_info, status):
+        self.last_callback_time = time.time() # Фиксируем, что поток жив
         try:
             # Защита: количество каналов в данных должно совпадать с массивом уровней
             if indata.shape[1] != len(self.rms_level):
@@ -567,52 +620,61 @@ class AudioLevelMeter(QWidget):
             pass
 
     def update_meter(self):
-        # Защита: если данные еще не готовы или идет переинициализация
-        if not hasattr(self, 'rms_level') or len(self.rms_level) != self.input_channels:
-            return
+            # --- WATCHDOG (Защита от TrueConf) ---
+            if hasattr(self, 'last_callback_time') and (time.time() - self.last_callback_time > 1.5):
+                print("Сработал Watchdog (Разделение записи при обрыве)...")
+                self.last_callback_time = time.time()
+                self.reconnect_audio()
+                return
+                
+            # Защита: если данные еще не готовы или идет переинициализация
+            if not hasattr(self, 'rms_level') or len(self.rms_level) != self.input_channels:
+                return
 
-        level_exceeded = any(level > -3 for level in self.peak_level)
-        self.title_label.setStyleSheet("color: red;" if level_exceeded else "color: lightgray;")
+            level_exceeded = any(level > -3 for level in self.peak_level)
+            self.title_label.setStyleSheet("color: red;" if level_exceeded else "color: lightgray;")
 
-        for channel in range(self.input_channels):
-            if channel >= len(self.rms_level): break
-            if self.display_mode == "RMS":
-                if self.rms_level[channel] > self.smoothed_level[channel]:
-                    self.smoothed_level[channel] = self.rms_level[channel]
+            # ... (остальной код update_meter остается без изменений)
+            
+            for channel in range(self.input_channels):
+                if channel >= len(self.rms_level): break
+                if self.display_mode == "RMS":
+                    if self.rms_level[channel] > self.smoothed_level[channel]:
+                        self.smoothed_level[channel] = self.rms_level[channel]
+                    else:
+                        decay_amount = self.DECAY_RATE * (self.update_interval/1000)
+                        self.smoothed_level[channel] = max(self.smoothed_level[channel] - decay_amount, -self.LEVEL_RANGE)
+                else: 
+                    if self.peak_display_level[channel] > -self.LEVEL_RANGE:
+                        distance = (self.peak_display_level[channel] + self.LEVEL_RANGE) / self.LEVEL_RANGE
+                        alpha = 0.005 + 0.01 * distance 
+                        self.peak_display_level[channel] = (1 - alpha) * self.peak_display_level[channel] + alpha * (-self.LEVEL_RANGE)
+                    if self.rms_level[channel] > self.smoothed_level[channel]:
+                        alpha = 0.5
+                    else:
+                        distance = (self.rms_level[channel] + self.LEVEL_RANGE) / self.LEVEL_RANGE
+                        alpha = 0.1 + 0.3 * distance
+                    self.smoothed_level[channel] = (1 - alpha) * self.smoothed_level[channel] + alpha * self.rms_level[channel]
+
+                if self.peak_hold_counter[channel] > 0:
+                    self.peak_hold_counter[channel] -= 1
                 else:
-                    decay_amount = self.DECAY_RATE * (self.update_interval/1000)
-                    self.smoothed_level[channel] = max(self.smoothed_level[channel] - decay_amount, -self.LEVEL_RANGE)
-            else: 
-                if self.peak_display_level[channel] > -self.LEVEL_RANGE:
-                    distance = (self.peak_display_level[channel] + self.LEVEL_RANGE) / self.LEVEL_RANGE
-                    alpha = 0.005 + 0.01 * distance 
-                    self.peak_display_level[channel] = (1 - alpha) * self.peak_display_level[channel] + alpha * (-self.LEVEL_RANGE)
-                if self.rms_level[channel] > self.smoothed_level[channel]:
-                    alpha = 0.5
-                else:
-                    distance = (self.rms_level[channel] + self.LEVEL_RANGE) / self.LEVEL_RANGE
-                    alpha = 0.1 + 0.3 * distance
-                self.smoothed_level[channel] = (1 - alpha) * self.smoothed_level[channel] + alpha * self.rms_level[channel]
+                    self.peak_level[channel] = (1 - 0.1) * self.peak_level[channel] + 0.1 * (-self.LEVEL_RANGE)
 
-            if self.peak_hold_counter[channel] > 0:
-                self.peak_hold_counter[channel] -= 1
-            else:
-                self.peak_level[channel] = (1 - 0.1) * self.peak_level[channel] + 0.1 * (-self.LEVEL_RANGE)
+            if self.show_spectrum:
+                for i in range(self.NUM_BANDS):
+                    if self.band_levels[i] > self.smoothed_band_levels[i]:
+                        self.smoothed_band_levels[i] = self.band_levels[i]
+                    else:
+                        decay_amount = self.DECAY_RATE * (self.update_interval/1000)
+                        self.smoothed_band_levels[i] = max(self.smoothed_band_levels[i] - decay_amount, -self.LEVEL_RANGE)
+                    if self.peak_band_hold[i] > 0:
+                        self.peak_band_hold[i] -= 1
+                    else:
+                        decay_amount = self.DECAY_RATE * 2 * (self.update_interval/1000)
+                        self.peak_band_levels[i] = max(self.peak_band_levels[i] - decay_amount, -self.LEVEL_RANGE)
 
-        if self.show_spectrum:
-            for i in range(self.NUM_BANDS):
-                if self.band_levels[i] > self.smoothed_band_levels[i]:
-                    self.smoothed_band_levels[i] = self.band_levels[i]
-                else:
-                    decay_amount = self.DECAY_RATE * (self.update_interval/1000)
-                    self.smoothed_band_levels[i] = max(self.smoothed_band_levels[i] - decay_amount, -self.LEVEL_RANGE)
-                if self.peak_band_hold[i] > 0:
-                    self.peak_band_hold[i] -= 1
-                else:
-                    decay_amount = self.DECAY_RATE * 2 * (self.update_interval/1000)
-                    self.peak_band_levels[i] = max(self.peak_band_levels[i] - decay_amount, -self.LEVEL_RANGE)
-
-        self.meter_canvas.update()
+            self.meter_canvas.update()
 
     def open_sound_settings(self):
         subprocess.run(["open", "x-apple.systempreferences:com.apple.Sound-Settings.extension"])

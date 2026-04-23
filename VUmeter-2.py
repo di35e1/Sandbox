@@ -35,6 +35,7 @@ class AudioLevelMeter:
         
         # Размер окна RMS по умолчанию (в миллисекундах)
         self.rms_window_size = 50  # 300ms по умолчанию
+        self.rms_window_size = 50  # 300ms по умолчанию
         
         # Состояние уровней
         self.peak_level = [-self.LEVEL_RANGE] * self.input_channels
@@ -63,7 +64,7 @@ class AudioLevelMeter:
         self.setup_window()
         self.setup_ui()
         self.setup_audio()
-        
+
         self.update_interval = 15
         self.root.after(self.update_interval, self.update_meter)
         self.root.mainloop()
@@ -138,7 +139,7 @@ class AudioLevelMeter:
             highlightthickness=0
         )
         self.settings_button_canvas.pack(pady=2)
-        self.setup_button(self.settings_button_canvas, "Settings", self.open_settings)
+        self.setup_button(self.settings_button_canvas, "Settings", self.show_settings_menu)
 
         # Кнопка Close
         self.close_button_canvas = tk.Canvas(
@@ -224,36 +225,62 @@ class AudioLevelMeter:
         )
         canvas.pack(pady=0)
 
-        # Создаем контекстное меню для шкалы
-        self.scale_menu = tk.Menu(self.root, tearoff=0)
+        db_scale = [-1, -6, -12, -18, -24, -30, -35, -40, -45, -50, -55, -60]
+        for db in db_scale:
+            y_pos = 220 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
+            color = "red" if db >= -6 else "orange" if db >= -12 else "green"
+            canvas.create_line(0, y_pos, 6, y_pos, fill=color, width=1.5)
+            canvas.create_text(
+                23, 
+                y_pos, 
+                text=f"{db}", 
+                fill="white", 
+                font=("Arial", 8), 
+                anchor="e"
+            )
+        
+        return canvas
+
+    def create_settings_menu(self):
+        """Создает контекстное меню для настроек"""
+        self.settings_menu = tk.Menu(self.root, tearoff=0)
+        
+        # Добавляем команду для открытия системных настроек звука
+        self.settings_menu.add_command(
+            label="System Sound Settings", 
+            command=self.open_sound_settings
+        )
+        
+        # Добавляем разделитель
+        self.settings_menu.add_separator()
         
         # Переменные для отслеживания выбранного режима
         self.rms_mode_var = tk.BooleanVar(value=True)  # По умолчанию RMS выбран
         self.peak_mode_var = tk.BooleanVar(value=False)
         
-        # Добавляем команды с галочками
-        self.scale_menu.add_checkbutton(
+        # Добавляем команды с галочками для режимов отображения
+        self.settings_menu.add_checkbutton(
             label="RMS + PEAK", 
             variable=self.rms_mode_var,
             command=lambda: self.set_display_mode("RMS")
         )
-        self.scale_menu.add_checkbutton(
+        self.settings_menu.add_checkbutton(
             label="PEAKs + RMS", 
             variable=self.peak_mode_var,
             command=lambda: self.set_display_mode("PEAK")
         )
 
         # Добавляем разделитель
-        self.scale_menu.add_separator()
+        self.settings_menu.add_separator()
         
         # Добавляем подменю для выбора размера окна RMS
-        self.rms_window_menu = tk.Menu(self.scale_menu, tearoff=0)
+        self.rms_window_menu = tk.Menu(self.settings_menu, tearoff=0)
         
         # Переменные для отслеживания выбранного размера окна
         self.rms_window_vars = {
             10: tk.BooleanVar(value=False),
-            50: tk.BooleanVar(value=False),
-            300: tk.BooleanVar(value=True),  # По умолчанию 300ms
+            50: tk.BooleanVar(value=True),
+            300: tk.BooleanVar(value=False),  # По умолчанию 300ms
             400: tk.BooleanVar(value=False)
         }
         
@@ -280,29 +307,14 @@ class AudioLevelMeter:
         ) 
 
         # Добавляем подменю в основное меню
-        self.scale_menu.add_cascade(label="Integration Time", menu=self.rms_window_menu)
-        
-        # Привязываем правую кнопку мыши (Button-2) к показу меню
-        canvas.bind("<Button-2>", self.show_scale_menu)
+        self.settings_menu.add_cascade(label="Integration Time", menu=self.rms_window_menu)
 
-        db_scale = [-1, -6, -12, -18, -24, -30, -35, -40, -45, -50, -55, -60]
-        for db in db_scale:
-            y_pos = 220 * (1 - (db + self.LEVEL_RANGE)/self.LEVEL_RANGE)
-            color = "red" if db >= -6 else "orange" if db >= -12 else "green"
-            canvas.create_line(0, y_pos, 6, y_pos, fill=color, width=1.5)
-            canvas.create_text(
-                23, 
-                y_pos, 
-                text=f"{db}", 
-                fill="white", 
-                font=("Arial", 8), 
-                anchor="e"
-            )
-        
-        return canvas
-
-    def show_scale_menu(self, event):
-        """Показывает контекстное меню для выбора режима отображения и размера окна RMS"""
+    def show_settings_menu(self):
+        """Показывает контекстное меню настроек"""
+        # Создаем меню, если оно еще не создано
+        if not hasattr(self, 'settings_menu'):
+            self.create_settings_menu()
+            
         # Обновляем галочки перед показом меню
         if self.display_mode == "RMS":
             self.rms_mode_var.set(True)
@@ -315,10 +327,14 @@ class AudioLevelMeter:
         for size, var in self.rms_window_vars.items():
             var.set(size == self.rms_window_size)
         
+        # Показываем меню рядом с кнопкой Settings
+        x = self.root.winfo_rootx() + self.settings_button_canvas.winfo_x()
+        y = self.root.winfo_rooty() + self.settings_button_canvas.winfo_y() + self.settings_button_canvas.winfo_height()
+        
         try:
-            self.scale_menu.tk_popup(event.x_root, event.y_root)
+            self.settings_menu.tk_popup(x, y)
         finally:
-            self.scale_menu.grab_release()
+            self.settings_menu.grab_release()
 
     def set_display_mode(self, mode):
         """Устанавливает режим отображения (RMS или PEAK)"""
@@ -695,7 +711,8 @@ class AudioLevelMeter:
         y = self.root.winfo_y() + (event.y - self.drag_data["y"])
         self.root.geometry(f"+{x}+{y}")
 
-    def open_settings(self):
+    def open_sound_settings(self):
+        """Открывает системные настройки звука (бывшее действие кнопки Settings)"""
         sound_uri = "x-apple.systempreferences:com.apple.Sound-Settings.extension"
         subprocess.run(["open", sound_uri], check=True)
 

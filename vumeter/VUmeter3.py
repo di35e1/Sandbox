@@ -171,16 +171,19 @@ class AudioLevelMeter(QWidget):
         self.recording_start_time = 0
 
         self.setup_ui()
+
+        # Флаг для предотвращения бесконечной рекурсии при отвале USB
+        self.is_reconnecting = False
         
         # --- ГОРЯЧИЕ КЛАВИШИ ---
         self.shortcut_rec = QShortcut(QKeySequence("Ctrl+R"), self)
         self.shortcut_rec.activated.connect(self.toggle_record)
         
-        # Плюс на основной клавиатуре (находится на кнопке "=")
+        # Для плюса на основной клавиатуре (находится на кнопке "=")
         self.shortcut_spec_main = QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_Equal), self)
         self.shortcut_spec_main.activated.connect(lambda: self.toggle_spectrum(not self.show_spectrum))
         
-        # Плюс на цифровом блоке Numpad
+        # Для плюса на цифровом блоке Numpad
         self.shortcut_spec_num = QShortcut(QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_Plus), self)
         self.shortcut_spec_num.activated.connect(lambda: self.toggle_spectrum(not self.show_spectrum))
         
@@ -391,7 +394,7 @@ class AudioLevelMeter(QWidget):
         menu.exec(self.mapToGlobal(self.btn_settings.rect().bottomLeft()))
 
     def change_device(self, index):
-        if index == self.current_device_index:
+        if index == self.current_device_index and not self.is_reconnecting:
             return
         self.current_device_index = index
         self.reconnect_audio()
@@ -486,47 +489,63 @@ class AudioLevelMeter(QWidget):
             self.btn_record.setText(f"{mins:02d}:{secs:02d}")
 
     def reconnect_audio(self):
-            # Запоминаем, шла ли запись до обрыва
-            was_recording = self.recording
+        if self.is_reconnecting:
+            return
             
-            if was_recording:
-                print("Обрыв потока: сохраняем текущий файл записи...")
-                self.toggle_record() # Эта команда безопасно закроет текущий файл
-            
-            try:
-                # Умная проверка: живо ли еще устройство
-                if self.current_device_index is not None:
-                    sd.query_devices(self.current_device_index, 'input')
-            except Exception:
-                print("Текущее устройство недоступно, переключаемся на системный микрофон...")
-                self.current_device_index = None # Сброс на дефолт
-                
-            try:
-                if hasattr(self, 'audio_stream') and self.audio_stream:
+        self.is_reconnecting = True
+        
+        # Запоминаем, шла ли запись до обрыва
+        was_recording = self.recording
+        
+        if was_recording:
+            print("Обрыв потока: сохраняем текущий файл записи...")
+            self.toggle_record() # Эта команда безопасно закроет текущий файл
+        
+        try:
+            # Остановка старого стрима
+            if hasattr(self, 'audio_stream') and self.audio_stream:
+                try:
                     self.audio_stream.stop()
                     self.audio_stream.close()
-                self.setup_audio()
-                self.apply_window_size()
+                except Exception: pass
+                self.audio_stream = None
+
+            # Сброс PortAudio
+            sd._terminate()
+            sd._initialize()
+
+            # Пытаемся настроить аудио
+            self.setup_audio()
+            self.apply_window_size()
+            
+            # Если стрим успешно создан и до обрыва шла запись
+            if was_recording and hasattr(self, 'audio_stream') and self.audio_stream is not None:
+                print("Связь восстановлена: начинаем запись в новый файл...")
+                self.toggle_record() # Эта команда создаст новый файл и запустит таймер заново
                 
-                # Если до обрыва шла запись, автоматически начинаем новый файл!
-                if was_recording:
-                    print("Связь восстановлена: начинаем запись в новый файл...")
-                    self.toggle_record() # Эта команда создаст новый файл и запустит таймер заново
-                    
-            except Exception as e:
-                print(f"Reconnect failed: {e}")
+        except Exception as e:
+            print(f"Reconnect failed: {e}")
+        finally:
+            self.is_reconnecting = False
 
     def setup_audio(self):
         """Безопасная настройка потока с проверкой каналов"""
         try:
             if self.current_device_index is None:
-                self.current_device_index = sd.default.device[0]
+                try:
+                    self.current_device_index = sd.default.device[0]
+                except Exception:
+                    print("Аудиоустройства не найдены.")
+                    return
 
             device_info = sd.query_devices(self.current_device_index, 'input')
             max_ch = device_info.get('max_input_channels', 0)
             
             if max_ch == 0:
-                print("Device has 0 channels. Waiting...")
+                print(f"Device {self.current_device_index} has no input channels. Waiting...")
+                # Пробуем откатиться на дефолт, если текущее устройство мертво
+                if self.current_device_index != sd.default.device[0]:
+                    self.current_device_index = None
                 return
 
             self.input_channels = max_ch
@@ -557,9 +576,10 @@ class AudioLevelMeter(QWidget):
                 callback=self.audio_callback,
             )
             self.audio_stream.start()
+            self.last_callback_time = time.time() # Фиксируем успешный старт
         except Exception as e:
             print(f"Setup failed: {e}")
-            self.change_device(None)
+            self.audio_stream = None # Больше не вызываем change_device(None), чтобы не было рекурсии
 
     def audio_callback(self, indata, frames, time_info, status):
         self.last_callback_time = time.time() # Фиксируем, что поток жив
@@ -620,11 +640,13 @@ class AudioLevelMeter(QWidget):
             pass
 
     def update_meter(self):
-            # --- WATCHDOG (Защита от TrueConf) ---
+            # --- WATCHDOG (Защита от обрывов потока) ---
             if hasattr(self, 'last_callback_time') and (time.time() - self.last_callback_time > 1.5):
-                print("Сработал Watchdog (Разделение записи при обрыве)...")
-                self.last_callback_time = time.time()
-                self.reconnect_audio()
+                # Проверяем, не находимся ли мы уже в процессе восстановления
+                if not getattr(self, 'is_reconnecting', False):
+                    print("Сработал Watchdog (Восстановление аудио)...")
+                    self.last_callback_time = time.time()
+                    self.reconnect_audio()
                 return
                 
             # Защита: если данные еще не готовы или идет переинициализация
@@ -633,8 +655,6 @@ class AudioLevelMeter(QWidget):
 
             level_exceeded = any(level > -3 for level in self.peak_level)
             self.title_label.setStyleSheet("color: red;" if level_exceeded else "color: lightgray;")
-
-            # ... (остальной код update_meter остается без изменений)
             
             for channel in range(self.input_channels):
                 if channel >= len(self.rms_level): break

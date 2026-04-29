@@ -1,6 +1,6 @@
 # BUILD INSTRUCTIONS:
 #     Build the app:
-#     pyinstaller --noconfirm --windowed --name "VU Meter" VUmeter3.py
+#     pyinstaller --noconfirm --windowed --icon "VUmeter.icns" --name "VU Meter" VUmeter3.py
 #
 #     Add microphone permission to Info.plist:
 #     Open dist/VU Meter.app/Contents/Info.plist and add these lines before </dict>:
@@ -349,9 +349,13 @@ class AudioLevelMeter(QWidget):
         act_sys = QAction("System Sound Settings", self)
         act_sys.triggered.connect(self.open_sound_settings)
         menu.addAction(act_sys)
+
+        act_sys = QAction("Audio MIDI Setup", self)
+        act_sys.triggered.connect(self.open_midi_setup)
+        menu.addAction(act_sys)
         menu.addSeparator()
 
-        act_spec = QAction("Show Spectrum", self, checkable=True)
+        act_spec = QAction('Show Spectrum (Cmd +)', self, checkable=True)
         act_spec.setChecked(self.show_spectrum)
         act_spec.triggered.connect(self.toggle_spectrum)
         menu.addAction(act_spec)
@@ -648,14 +652,14 @@ class AudioLevelMeter(QWidget):
                     self.last_callback_time = time.time()
                     self.reconnect_audio()
                 return
-                
+
             # Защита: если данные еще не готовы или идет переинициализация
             if not hasattr(self, 'rms_level') or len(self.rms_level) != self.input_channels:
                 return
 
             level_exceeded = any(level > -3 for level in self.peak_level)
             self.title_label.setStyleSheet("color: red;" if level_exceeded else "color: lightgray;")
-            
+
             for channel in range(self.input_channels):
                 if channel >= len(self.rms_level): break
                 if self.display_mode == "RMS":
@@ -698,6 +702,9 @@ class AudioLevelMeter(QWidget):
 
     def open_sound_settings(self):
         subprocess.run(["open", "x-apple.systempreferences:com.apple.Sound-Settings.extension"])
+
+    def open_midi_setup(self):
+        subprocess.run(["open", "-a", "Audio MIDI Setup.app"])
 
     def close_program(self):
         if self.recording: self.toggle_record()

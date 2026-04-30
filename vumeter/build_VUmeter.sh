@@ -11,9 +11,12 @@ VOL_NAME="${APP_NAME} preview"
 
 echo "--- 1. Запуск PyInstaller ---"
 python3 -m PyInstaller --noconfirm --windowed \
+    --hidden-import "importlib.resources" \
     --name "$APP_NAME" \
     --icon "$ICON_NAME" \
     "$SCRIPT_NAME"
+
+
 
 PLIST_PATH="dist/$APP_NAME.app/Contents/Info.plist"
 

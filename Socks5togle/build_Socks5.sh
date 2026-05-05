@@ -1,29 +1,25 @@
 #!/bin/bash
 
-# Названия файлов
 APP_NAME="Socks5Toggle"
 SCRIPT_NAME="Socks5toggle.py"
 ICON_NAME="icon.icns"
-BG_IMAGE="background.png" # <--- Имя твоего фонового изображения
+BG_IMAGE="background.png"
 VERSION="1.0"
 DMG_NAME="${APP_NAME}_${VERSION}.dmg"
 VOL_NAME="${APP_NAME} installation"
-
 
 # Очистка старых билдов
 rm -rf build dist
 
 # Сборка приложения
-# Замените icon.icns на имя вашего файла иконки (или удалите флаг --icon, если её нет)
-
 python3 -m PyInstaller --noconfirm --windowed --noconsole \
     --target-architecture universal2 \
     --name "$APP_NAME" \
     --icon "$ICON_NAME" \
     "$SCRIPT_NAME"
 
-### Скрываем иконку из Дока
-### Эта команда добавляет параметр LSUIElement = true в Info.plist собранного приложения
+# Скрываем иконку приложение из Дока
+# Эта команда добавляет параметр LSUIElement = true в Info.plist собранного приложения
 echo "Настройка скрытия из Dock..."
 plutil -insert LSUIElement -bool true "dist/$APP_NAME.app/Contents/Info.plist"
 
@@ -44,16 +40,15 @@ rm -f "$MOUNT_DIR/.DS_Store"
 cp -R "dist/$APP_NAME.app" "$MOUNT_DIR/"
 ln -s /Applications "$MOUNT_DIR/Applications"
 
-# Копируем иконку для тома (опционально)
+# Копируем иконку для тома
 cp "$ICON_NAME" "$MOUNT_DIR/.VolumeIcon.icns"
 setfile -a C "$MOUNT_DIR"
 
-echo "--- 5. Настройка фона и иконок через AppleScript ---"
-# Создаем скрытую папку для фона и копируем туда картинку
+echo "Настройка фона и иконок через AppleScript"
 mkdir "$MOUNT_DIR/.background"
 cp "$BG_IMAGE" "$MOUNT_DIR/.background/"
 
-# Выполняем AppleScript для настройки окна Finder
+# AppleScript для настройки окна Finder
 echo "
 tell application \"Finder\"
     tell disk \"$VOL_NAME\"
@@ -98,9 +93,9 @@ read -n 1 -s
 # Размонтируем
 hdiutil detach "$MOUNT_DIR"
 
-echo "--- 6. Финализация DMG ---"
+echo "Финализация DMG"
 hdiutil convert "dist/tmp.dmg.sparseimage" -format UDZO -o "dist/$DMG_NAME"
 rm "dist/tmp.dmg.sparseimage"
 
-echo "--- ГОТОВО! Образ создан: dist/$DMG_NAME ---"
+echo "Образ создан: dist/$DMG_NAME ---"
 open -R "dist/$DMG_NAME"

@@ -5,16 +5,11 @@ import sys
 import plistlib
 import logging
 
-# ----------------- НАСТРОЙКИ -----------------
-# Путь к файлу автозагрузки в системе
 PLIST_PATH = os.path.expanduser("~/Library/LaunchAgents/com.proxytoggle.app.plist")
-
-# Настройка логирования
-LOG_DIR = os.path.expanduser("~/Library/Logs")
+LOG_DIR = os.path.expanduser("/tmp")
 LOG_FILE = os.path.join(LOG_DIR, "Socks5Toggle.log")
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# Инициализация логгера
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
@@ -24,13 +19,12 @@ logging.basicConfig(
 logging.info("Приложение Socks5Toggle запущено")
 
 
-# ----------------- ФУНКЦИИ СЕТИ -----------------
+# Network
 def get_active_network_service():
     """Определяет человеческое название активного интерфейса (Wi-Fi, Ethernet и т.д.).
        Возвращает None, если активного подключения (маршрута по умолчанию) нет."""
     try:
         route_proc = subprocess.run(["route", "get", "default"], capture_output=True, text=True)
-        # Если маршрута по умолчанию нет, команда вернет код ошибки
         if route_proc.returncode != 0:
             return None
             
@@ -56,9 +50,9 @@ def get_active_network_service():
         return None
 
 
-# ----------------- АВТОЗАГРУЗКА -----------------
+# Open at login
 def is_autostart_enabled():
-    """Проверяет, существует ли файл автозагрузки."""
+    """Проверяет, существует ли plist файл для автозагрузки."""
     return os.path.exists(PLIST_PATH)
 
 def toggle_autostart_state(enable):
@@ -72,11 +66,21 @@ def toggle_autostart_state(enable):
             if not os.path.exists(launch_agents_dir):
                 os.makedirs(launch_agents_dir, exist_ok=True)
 
+            # plist_content = {
+            #     'Label': 'com.proxytoggle.app',
+            #     'ProgramArguments': ['/usr/bin/open', '-a', app_path],
+            #     'RunAtLoad': True
+            # }
+
             plist_content = {
                 'Label': 'com.proxytoggle.app',
-                'ProgramArguments': ['/usr/bin/open', '-a', app_path],
-                'RunAtLoad': True
+                'ProgramArguments': [current_exec],  # Просто передаем саму переменную!
+                'RunAtLoad': True,
+                'KeepAlive': {
+                    'SuccessfulExit': False  # Умный автоперезапуск при падении
+                }
             }
+
             with open(PLIST_PATH, 'wb') as f:
                 plistlib.dump(plist_content, f)
             logging.info("Автозагрузка включена.")
